@@ -1,0 +1,5 @@
+- targets:
+  - 192.168.1.10
+  - 192.168.1.11
+  labels:
+    job: snmp-endpoints

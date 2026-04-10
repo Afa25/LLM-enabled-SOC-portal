@@ -1,0 +1,204 @@
+%YAML 1.1
+---
+# ═══════════════════════════════════════════════════════
+#  Suricata Configuration — SOC Portal
+# ═══════════════════════════════════════════════════════
+
+vars:
+  address-groups:
+    HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
+    EXTERNAL_NET: "!$HOME_NET"
+    HTTP_SERVERS: "$HOME_NET"
+    SQL_SERVERS: "$HOME_NET"
+    DNS_SERVERS: "$HOME_NET"
+    TELNET_SERVERS: "$HOME_NET"
+    AIM_SERVERS: "$EXTERNAL_NET"
+    DC_SERVERS: "$HOME_NET"
+    DNP3_SERVER: "$HOME_NET"
+    DNP3_CLIENT: "$HOME_NET"
+    MODBUS_CLIENT: "$HOME_NET"
+    MODBUS_SERVER: "$HOME_NET"
+    ENIP_CLIENT: "$HOME_NET"
+    ENIP_SERVER: "$HOME_NET"
+
+  port-groups:
+    HTTP_PORTS: "80"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS: 1521
+    SSH_PORTS: 22
+    DNP3_PORTS: 20000
+    MODBUS_PORTS: 502
+    FILE_DATA_PORTS: "[$HTTP_PORTS,110,143]"
+    FTP_PORTS: 21
+    GENEVE_PORTS: 6081
+    VXLAN_PORTS: 4789
+    TEREDO_PORTS: 3544
+
+default-log-dir: /var/log/suricata/
+
+stats:
+  enabled: yes
+  interval: 8
+
+outputs:
+  - fast:
+      enabled: no
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      pcap-file: false
+      community-id: true
+      types:
+        - alert:
+            payload: yes
+            payload-buffer-size: 4kb
+            http-body: yes
+            http-body-printable: yes
+            metadata: yes
+            tagged-packets: yes
+            xff:
+              enabled: yes
+              mode: extra-data
+              deployment: reverse
+              header: X-Forwarded-For
+        - anomaly:
+            enabled: yes
+            types:
+              decode: no
+              stream: no
+              applayer: yes
+        - http:
+            extended: yes
+        - dns:
+            version: 2
+        - tls:
+            extended: yes
+        - files:
+            force-magic: no
+        - smtp: {}
+        - dnp3: {}
+        - ftp: {}
+        - rdp: {}
+        - nfs: {}
+        - ikev2: {}
+        - krb5: {}
+        - quic: {}
+        - dhcp:
+            enabled: yes
+            extended: yes
+        - ssh: {}
+        - flow: {}
+        - netflow: {}
+        - stats:
+            totals: yes
+            threads: no
+            deltas: no
+        - sip: {}
+
+logging:
+  default-log-level: notice
+  outputs:
+    - console:
+        enabled: no
+    - file:
+        enabled: yes
+        level: info
+        filename: /var/log/suricata/suricata.log
+    - syslog:
+        enabled: no
+
+af-packet:
+  - interface: default
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    use-mmap: yes
+    ring-size: 2048
+    block-size: 32768
+    block-timeout: 10
+    use-emergency-flush: yes
+
+pcap:
+  - interface: default
+
+app-layer:
+  protocols:
+    rfb:
+      enabled: yes
+      detection-ports:
+        dp: 5900, 5901, 5902, 5903, 5904, 5905, 5906, 5907, 5908, 5909
+    krb5:
+      enabled: yes
+    snmp:
+      enabled: yes
+    ikev2:
+      enabled: yes
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443
+    dcerpc:
+      enabled: yes
+    ftp:
+      enabled: yes
+      memcap: 64mb
+    rdp:
+      enabled: yes
+    ssh:
+      enabled: yes
+    smtp:
+      enabled: yes
+      raw-extraction: no
+      mime:
+        decode-mime: yes
+        decode-base64: yes
+        decode-quoted-printable: yes
+        header-value-depth: 2000
+        extract-urls: yes
+        body-md5: no
+    imap:
+      enabled: detection-only
+    dns:
+      tcp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+      udp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+    http:
+      enabled: yes
+      libhtp:
+        default-config:
+          personality: IDS
+          request-body-limit: 100kb
+          response-body-limit: 100kb
+          request-body-minimal-inspect-size: 32kb
+          request-body-inspect-window: 4kb
+          response-body-minimal-inspect-size: 40kb
+          response-body-inspect-window: 16kb
+          response-body-decompress-layer-limit: 2
+          http-body-inline: auto
+          swf-decompression:
+            enabled: yes
+            type: both
+            compress-depth: 100kb
+            decompress-depth: 100kb
+          double-decode-path: no
+          double-decode-query: no
+    nfs:
+      enabled: yes
+    tftp:
+      enabled: yes
+
+# Emerging Threats Open ruleset (free)
+rule-files:
+  - suricata.rules
+
+default-rule-path: /var/lib/suricata/rules
+
+engine-analysis:
+  rules-fast-pattern: yes
+  rules: yes

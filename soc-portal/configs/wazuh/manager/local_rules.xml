@@ -1,0 +1,110 @@
+<!-- ═══════════════════════════════════════════════════════════
+     SOC PORTAL — CUSTOM WAZUH DETECTION RULES
+     File: /var/ossec/etc/rules/local_rules.xml
+     All rule IDs start at 100100 to avoid conflict with built-ins
+     ═══════════════════════════════════════════════════════════ -->
+<group name="local,soc-portal">
+
+  <!-- ─── T1218 — LOLBin Proxy Execution ─────────────────── -->
+  <rule id="100100" level="10">
+    <if_group>windows</if_group>
+    <field name="win.eventdata.image" type="pcre2">(?i)(certutil|mshta|regsvr32|rundll32|msiexec|wscript|cscript)\.exe</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(http|ftp|\-urlcache|/scrobj|encode|javascript|vbscript)</field>
+    <description>Possible LOLBin proxy execution: $(win.eventdata.image)</description>
+    <mitre><id>T1218</id></mitre>
+    <group>attack,lolbin</group>
+  </rule>
+
+  <!-- ─── T1059.001 — PowerShell Obfuscation ─────────────── -->
+  <rule id="100101" level="10">
+    <if_group>windows</if_group>
+    <field name="win.system.eventID">^4104$</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)(invoke-expression|iex\s|encodedcommand|\-enc\s|\-bypass|frombase64string)</field>
+    <description>Obfuscated PowerShell execution detected</description>
+    <mitre><id>T1059.001</id><id>T1027</id></mitre>
+    <group>attack,powershell</group>
+  </rule>
+
+  <!-- ─── T1110.001 — SSH Brute Force ─────────────────────── -->
+  <rule id="100200" level="10" frequency="8" timeframe="60">
+    <if_matched_sid>5716</if_matched_sid>
+    <same_source_ip />
+    <description>SSH brute-force attack from $(srcip)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>attack,brute_force</group>
+  </rule>
+
+  <!-- ─── T1071.004 — DNS Tunnelling (long query) ─────────── -->
+  <rule id="100300" level="12">
+    <if_sid>110002</if_sid>
+    <field name="zeek.dns.query" type="pcre2">.{60,}</field>
+    <description>Possible DNS tunnelling — abnormally long DNS query: $(zeek.dns.query)</description>
+    <mitre><id>T1071.004</id></mitre>
+    <group>attack,dns_tunnel</group>
+  </rule>
+
+  <rule id="100301" level="10" frequency="100" timeframe="60">
+    <if_sid>110002</if_sid>
+    <same_field>zeek.dns.orig_h</same_field>
+    <description>Possible DNS tunnelling — high DNS query rate from $(zeek.dns.orig_h)</description>
+    <mitre><id>T1071.004</id></mitre>
+    <group>attack,dns_tunnel</group>
+  </rule>
+
+  <!-- ─── T1136.001 — New Local Admin Account ─────────────── -->
+  <rule id="100400" level="12">
+    <if_group>windows</if_group>
+    <field name="win.system.eventID">^4728$|^4732$</field>
+    <description>User added to privileged Windows group on $(agent.name)</description>
+    <mitre><id>T1136.001</id></mitre>
+    <group>attack,account_creation</group>
+  </rule>
+
+  <rule id="100401" level="12">
+    <if_group>syslog</if_group>
+    <match>useradd|usermod</match>
+    <regex>sudo|wheel|admin</regex>
+    <description>New user added to privileged group on $(agent.name)</description>
+    <mitre><id>T1136.001</id></mitre>
+    <group>attack,account_creation</group>
+  </rule>
+
+  <!-- ─── T1550.002 — Pass the Hash (lsass access) ─────────── -->
+  <rule id="100500" level="14">
+    <if_group>windows</if_group>
+    <field name="win.system.eventID">^10$</field>
+    <field name="win.eventdata.targetImage" type="pcre2">(?i)lsass\.exe</field>
+    <field name="win.eventdata.sourceImage" type="pcre2" negate="yes">(?i)(MsMpEng|defender|antimalware|svchost)</field>
+    <description>Suspicious lsass.exe access — possible credential dumping on $(agent.name)</description>
+    <mitre><id>T1550.002</id><id>T1003.001</id></mitre>
+    <group>attack,credential_access</group>
+  </rule>
+
+  <!-- ─── T1048 — Data Exfiltration (large outbound) ──────── -->
+  <rule id="100600" level="10">
+    <if_sid>110003</if_sid>
+    <field name="zeek.conn.orig_bytes" type="pcre2">^[5-9]\d{6,}$|^\d{8,}$</field>
+    <field name="zeek.conn.id.resp_p" type="pcre2">^(?!80$|443$|22$)\d+$</field>
+    <description>Possible data exfiltration — large outbound transfer on non-standard port from $(zeek.conn.id.orig_h)</description>
+    <mitre><id>T1048</id></mitre>
+    <group>attack,exfiltration</group>
+  </rule>
+
+  <!-- ─── T1486 — Ransomware file activity ────────────────── -->
+  <rule id="100700" level="15">
+    <if_group>syscheck</if_group>
+    <field name="syscheck.path" type="pcre2">(?i)\.(locked|encrypted|enc|ransom|crypted|crypt)$</field>
+    <description>Possible ransomware file encryption activity on $(agent.name)</description>
+    <mitre><id>T1486</id></mitre>
+    <group>attack,ransomware</group>
+  </rule>
+
+  <rule id="100701" level="14" frequency="20" timeframe="60">
+    <if_matched_sid>550</if_matched_sid>
+    <same_agent />
+    <description>High rate of file modifications — possible ransomware on $(agent.name)</description>
+    <mitre><id>T1486</id></mitre>
+    <group>attack,ransomware</group>
+  </rule>
+
+</group>

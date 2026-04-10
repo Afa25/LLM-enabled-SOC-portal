@@ -1,0 +1,126 @@
+{
+  "title": "SOC Security Operations Dashboard",
+  "uid": "soc-main-dashboard",
+  "version": 1,
+  "schemaVersion": 38,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "tags": ["soc", "security", "wazuh"],
+  "panels": [
+    {
+      "id": 1, "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "type": "stat", "title": "Total Alerts (24h)",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{"color":"green","value":null},{"color":"yellow","value":100},{"color":"red","value":500}] } } },
+      "options": { "reduceOptions": { "calcs": ["count"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "targets": [{ "refId": "A", "query": "*", "queryType": "lucene", "metrics": [{"id":"1","type":"count"}] }]
+    },
+    {
+      "id": 2, "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "type": "stat", "title": "Critical Alerts (Level 12+)",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "red" } } },
+      "options": { "reduceOptions": { "calcs": ["count"] }, "colorMode": "background" },
+      "targets": [{ "refId": "A", "query": "rule.level:>=12", "queryType": "lucene", "metrics": [{"id":"1","type":"count"}] }]
+    },
+    {
+      "id": 3, "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "type": "stat", "title": "High Alerts (Level 7–11)",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "orange" } } },
+      "options": { "reduceOptions": { "calcs": ["count"] }, "colorMode": "background" },
+      "targets": [{ "refId": "A", "query": "rule.level:[7 TO 11]", "queryType": "lucene", "metrics": [{"id":"1","type":"count"}] }]
+    },
+    {
+      "id": 4, "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "type": "stat", "title": "Unique Agents Reporting",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "reduceOptions": { "calcs": ["sum"] }, "colorMode": "background" },
+      "targets": [{ "refId": "A", "query": "*", "queryType": "lucene", "metrics": [{"id":"1","type":"cardinality","field":"agent.name"}] }]
+    },
+    {
+      "id": 5, "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "type": "gauge", "title": "Alert Severity Distribution",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "fieldConfig": { "defaults": { "min": 0, "max": 15, "thresholds": { "steps": [{"color":"green","value":null},{"color":"yellow","value":7},{"color":"orange","value":10},{"color":"red","value":12}] } } },
+      "targets": [{ "refId": "A", "query": "*", "queryType": "lucene", "metrics": [{"id":"1","type":"avg","field":"rule.level"}], "alias": "Avg Level" }]
+    },
+    {
+      "id": 10, "gridPos": { "h": 8, "w": 16, "x": 0, "y": 4 },
+      "type": "timeseries", "title": "Alert Volume Over Time",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 15 } } },
+      "options": { "legend": { "displayMode": "list" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "query": "*",            "queryType": "lucene", "metrics": [{"id":"1","type":"count"}], "bucketAggs": [{"id":"2","type":"date_histogram","field":"timestamp","settings":{"interval":"auto"}}], "alias": "All Alerts" },
+        { "refId": "B", "query": "rule.level:>=12", "queryType": "lucene", "metrics": [{"id":"1","type":"count"}], "bucketAggs": [{"id":"2","type":"date_histogram","field":"timestamp","settings":{"interval":"auto"}}], "alias": "Critical" }
+      ]
+    },
+    {
+      "id": 11, "gridPos": { "h": 8, "w": 8, "x": 16, "y": 4 },
+      "type": "piechart", "title": "Alerts by Severity Level",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "options": { "pieType": "donut", "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [{ "refId": "A", "query": "*", "queryType": "lucene", "metrics": [{"id":"1","type":"count"}], "bucketAggs": [{"id":"2","type":"terms","field":"rule.level","settings":{"size":"10","order":"desc","orderBy":"1"}}], "alias": "Level $term" }]
+    },
+    {
+      "id": 20, "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "type": "barchart", "title": "Top Alert Categories (Rule Groups)",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" } } },
+      "options": { "orientation": "horizontal", "xTickLabelRotation": 0 },
+      "targets": [{ "refId": "A", "query": "*", "queryType": "lucene", "metrics": [{"id":"1","type":"count"}], "bucketAggs": [{"id":"2","type":"terms","field":"rule.groups","settings":{"size":"10","order":"desc","orderBy":"1"}}], "alias": "$term" }]
+    },
+    {
+      "id": 21, "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "type": "barchart", "title": "Top Endpoints by Alert Count",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "orientation": "horizontal" },
+      "targets": [{ "refId": "A", "query": "*", "queryType": "lucene", "metrics": [{"id":"1","type":"count"}], "bucketAggs": [{"id":"2","type":"terms","field":"agent.name","settings":{"size":"10","order":"desc","orderBy":"1"}}], "alias": "$term" }]
+    },
+    {
+      "id": 30, "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "type": "table", "title": "Top Triggered Rules",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "options": { "footer": { "show": false } },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } } },
+      "targets": [{ "refId": "A", "query": "*", "queryType": "lucene", "metrics": [{"id":"1","type":"count"}], "bucketAggs": [{"id":"2","type":"terms","field":"rule.description","settings":{"size":"15","order":"desc","orderBy":"1"}}], "alias": "Count" }]
+    },
+    {
+      "id": 31, "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "type": "table", "title": "MITRE ATT&CK Techniques Observed",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "options": { "footer": { "show": false } },
+      "targets": [{ "refId": "A", "query": "_exists_:rule.mitre.technique", "queryType": "lucene", "metrics": [{"id":"1","type":"count"}], "bucketAggs": [{"id":"2","type":"terms","field":"rule.mitre.technique","settings":{"size":"20","order":"desc","orderBy":"1"}}] }]
+    },
+    {
+      "id": 40, "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+      "type": "logs", "title": "Recent High-Severity Events (Level 10+)",
+      "datasource": { "type": "grafana-opensearch-datasource", "uid": "${DS_WAZUH-OPENSEARCH}" },
+      "options": { "showTime": true, "showLabels": false, "wrapLogMessage": true, "sortOrder": "Descending" },
+      "targets": [{ "refId": "A", "query": "rule.level:>=10", "queryType": "lucene", "metrics": [{"id":"1","type":"logs"}] }]
+    },
+    {
+      "id": 50, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 36 },
+      "type": "timeseries", "title": "System CPU Usage (SOC Server)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "targets": [{ "refId": "A", "expr": "100 - (avg by(instance)(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "legendFormat": "CPU %" }]
+    },
+    {
+      "id": 51, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 36 },
+      "type": "timeseries", "title": "System Memory Usage (SOC Server)",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "targets": [{ "refId": "A", "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100", "legendFormat": "RAM %" }]
+    }
+  ],
+  "templating": {
+    "list": [
+      { "name": "DS_WAZUH-OPENSEARCH", "type": "datasource", "query": "grafana-opensearch-datasource" },
+      { "name": "DS_PROMETHEUS",       "type": "datasource", "query": "prometheus" }
+    ]
+  }
+}
