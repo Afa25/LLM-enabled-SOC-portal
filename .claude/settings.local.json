@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker version *)",
+      "Bash(powershell -Command \"Restart-Service 'com.docker.service' -ErrorAction SilentlyContinue; Start-Sleep 5; Get-Service 'com.docker.service' | Select-Object Status\")",
+      "Bash(powershell -Command \"Get-Service *docker* | Select-Object Name, Status\")",
+      "Bash(powershell -Command \"Start-Service 'com.docker.service'; Start-Sleep 8; Get-Service 'com.docker.service' | Select-Object Status\")",
+      "Bash(powershell -Command \"Start-Process 'C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe' -ErrorAction SilentlyContinue\")",
+      "Bash(powershell -Command ' *)",
+      "Bash(docker context *)",
+      "Bash(powershell -Command \"Get-Service *docker* | Format-Table Name, Status, StartType\")",
+      "Bash(powershell -Command \"Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue | Select-Object Id,CPU,WorkingSet\")",
+      "Bash(powershell -Command \"Get-Service 'com.docker.service' | Select-Object Status\")"
+    ]
+  }
+}

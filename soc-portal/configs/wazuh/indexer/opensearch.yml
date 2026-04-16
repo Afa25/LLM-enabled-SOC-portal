@@ -27,10 +27,10 @@ plugins.security.ssl.http.pemkey_filepath:  /usr/share/wazuh-indexer/config/cert
 plugins.security.ssl.http.pemtrustedcas_filepath: /usr/share/wazuh-indexer/config/certs/root-ca.pem
 
 plugins.security.nodes_dn:
-  - CN=wazuh-indexer,OU=Wazuh,O=Wazuh,L=California,C=US
+  - "O=SOC,CN=wazuh-indexer"
 
 plugins.security.authcz.admin_dn:
-  - CN=admin,OU=Wazuh,O=Wazuh,L=California,C=US
+  - "O=SOC,CN=wazuh-indexer"
 
 plugins.security.check_snapshot_restore_write_privileges: true
 plugins.security.enable_snapshot_restore_privilege: true

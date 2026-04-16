@@ -110,7 +110,7 @@ async function getAlerts({ limit = 50, level, from, to } = {}) {
                'rule.mitre','agent.name','agent.ip','data']
   };
   const res = await indexerQuery('wazuh-alerts-*', body);
-  return res?.hits?.hits?.map(h => h._source) || [];
+  return res?.hits?.hits?.map(h => ({ _id: h._id, ...h._source })) || [];
 }
 
 async function getAlertCountByRange(startISO, endISO) {

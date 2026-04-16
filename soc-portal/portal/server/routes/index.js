@@ -1,24 +1,30 @@
 const express = require('express');
-const authRoutes = require('./auth');
-const alertRoutes = require('./alerts');
-const reportRoutes = require('./reports');
+const authRoutes    = require('./auth');
+const alertRoutes   = require('./alerts');
+const reportRoutes  = require('./reports');
 const scheduleRoutes = require('./schedule');
-const statsRoutes = require('./stats');
-const agentRoutes = require('./agents');
-const healthRoutes = require('./health');
-const deviceRoutes = require('./devices');
+const statsRoutes   = require('./stats');
+const agentRoutes   = require('./agents');
+const healthRoutes  = require('./health');
+const deviceRoutes  = require('./devices');
 const pairingRoutes = require('./pairing');
+const triageRoutes  = require('./triage');
+const chatRoutes    = require('./chat');
+const toolsRoutes   = require('./tools');
 
 const router = express.Router();
 
-router.use('/auth', authRoutes);
-router.use('/alerts', alertRoutes);
-router.use('/reports', reportRoutes);
+router.use('/auth',     authRoutes);
+router.use('/alerts',   alertRoutes);
+router.use('/reports',  reportRoutes);
 router.use('/schedule', scheduleRoutes);
-router.use('/stats', statsRoutes);
-router.use('/agents', agentRoutes);
-router.use('/health', healthRoutes);
-router.use('/devices', deviceRoutes);
-router.use('/pairing', pairingRoutes);
+router.use('/stats',    statsRoutes);
+router.use('/agents',   agentRoutes);
+router.use('/health',   healthRoutes);
+router.use('/devices',  deviceRoutes);
+router.use('/pairing',  pairingRoutes);
+router.use('/triage',   triageRoutes);
+router.use('/chat',     chatRoutes);
+router.use('/tools',    toolsRoutes);
 
 module.exports = router;

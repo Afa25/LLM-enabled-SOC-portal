@@ -91,6 +91,27 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_pairing_token ON pairing_tokens(token);
     CREATE INDEX IF NOT EXISTS idx_pairing_code ON pairing_tokens(code);
     CREATE INDEX IF NOT EXISTS idx_pairing_status ON pairing_tokens(status);
+
+    CREATE TABLE IF NOT EXISTS triage_results (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      alert_id           TEXT    UNIQUE NOT NULL,
+      alert_data         TEXT    NOT NULL,
+      verdict            TEXT    NOT NULL CHECK(verdict IN ('true_positive','false_positive','needs_review')),
+      confidence         INTEGER NOT NULL CHECK(confidence BETWEEN 0 AND 100),
+      explanation        TEXT    NOT NULL,
+      mitre_tactic       TEXT,
+      recommended_action TEXT    NOT NULL,
+      model              TEXT    NOT NULL,
+      analyst_status     TEXT    NOT NULL DEFAULT 'pending'
+                                   CHECK(analyst_status IN ('pending','confirmed','dismissed')),
+      analyst_note       TEXT,
+      created            TEXT    DEFAULT (datetime('now')),
+      reviewed           TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_triage_alert_id ON triage_results(alert_id);
+    CREATE INDEX IF NOT EXISTS idx_triage_verdict ON triage_results(verdict);
+    CREATE INDEX IF NOT EXISTS idx_triage_analyst ON triage_results(analyst_status);
   `);
 
   // Seed default admin user if not exists

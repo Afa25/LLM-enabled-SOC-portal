@@ -34,23 +34,6 @@
     <group>attack,brute_force</group>
   </rule>
 
-  <!-- ─── T1071.004 — DNS Tunnelling (long query) ─────────── -->
-  <rule id="100300" level="12">
-    <if_sid>110002</if_sid>
-    <field name="zeek.dns.query" type="pcre2">.{60,}</field>
-    <description>Possible DNS tunnelling — abnormally long DNS query: $(zeek.dns.query)</description>
-    <mitre><id>T1071.004</id></mitre>
-    <group>attack,dns_tunnel</group>
-  </rule>
-
-  <rule id="100301" level="10" frequency="100" timeframe="60">
-    <if_sid>110002</if_sid>
-    <same_field>zeek.dns.orig_h</same_field>
-    <description>Possible DNS tunnelling — high DNS query rate from $(zeek.dns.orig_h)</description>
-    <mitre><id>T1071.004</id></mitre>
-    <group>attack,dns_tunnel</group>
-  </rule>
-
   <!-- ─── T1136.001 — New Local Admin Account ─────────────── -->
   <rule id="100400" level="12">
     <if_group>windows</if_group>
@@ -78,16 +61,6 @@
     <description>Suspicious lsass.exe access — possible credential dumping on $(agent.name)</description>
     <mitre><id>T1550.002</id><id>T1003.001</id></mitre>
     <group>attack,credential_access</group>
-  </rule>
-
-  <!-- ─── T1048 — Data Exfiltration (large outbound) ──────── -->
-  <rule id="100600" level="10">
-    <if_sid>110003</if_sid>
-    <field name="zeek.conn.orig_bytes" type="pcre2">^[5-9]\d{6,}$|^\d{8,}$</field>
-    <field name="zeek.conn.id.resp_p" type="pcre2">^(?!80$|443$|22$)\d+$</field>
-    <description>Possible data exfiltration — large outbound transfer on non-standard port from $(zeek.conn.id.orig_h)</description>
-    <mitre><id>T1048</id></mitre>
-    <group>attack,exfiltration</group>
   </rule>
 
   <!-- ─── T1486 — Ransomware file activity ────────────────── -->
