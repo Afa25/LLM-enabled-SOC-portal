@@ -279,6 +279,8 @@ sleep 30
 
 ### 7d. Pull the LLM Model (runs once, takes 2–5 min)
 
+The stack uses a **pinned model** (`llama3.2:3b`, ~2 GB) and a **pinned Ollama image** (`0.4.7`) so disk usage stays fixed and nothing grows on restart.
+
 ```bash
 docker compose --env-file .env up -d ollama-init
 docker logs soc-ollama-init -f

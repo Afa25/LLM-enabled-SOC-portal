@@ -1,6 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║         OPEN-SOURCE SOC PLATFORM — DOCKER COMPOSE               ║
-# ║  Wazuh · Grafana · Zeek · Suricata · OpenVAS · Ollama · Portal  ║
+# ║  Wazuh · Grafana · Zeek · Suricata · OpenCTI · Velociraptor     ║
+# ║  Ollama · Portal                                                 ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 networks:
@@ -19,13 +20,16 @@ volumes:
   ollama-models:
   portal-db:
   portal-backups:
-  openvas-data:
   zeek-logs:
   suricata-logs:
   nginx-logs:
   nginx-certs:
-  crowdsec-data:
   wazuh-dashboard-config:
+  opencti-elasticsearch-data:
+  opencti-redis-data:
+  opencti-rabbitmq-data:
+  opencti-minio-data:
+  velociraptor-data:
 
 services:
 
@@ -225,31 +229,10 @@ services:
     command: -i ${SOC_NETWORK_INTERFACE:-eth0} --af-packet
 
   # ────────────────────────────────────────────────────────────────
-  # OPENVAS (vulnerability scanner)
-  # Correct image: greenbone/openvas-scanner via immauss/openvas
-  # immauss/openvas is the maintained single-container OpenVAS image
-  # ────────────────────────────────────────────────────────────────
-  openvas:
-    image: immauss/openvas:22.4.50
-    container_name: soc-openvas
-    restart: unless-stopped
-    environment:
-      - PASSWORD=${OPENVAS_PASSWORD}
-      - USERNAME=admin
-    volumes:
-      - openvas-data:/data
-    ports:
-      - "127.0.0.1:9392:9392"
-    networks:
-      soc-net:
-        ipv4_address: 172.20.0.16
-    # First run takes 10-20 min for NVT feed sync
-
-  # ────────────────────────────────────────────────────────────────
   # OLLAMA (local LLM — no API key needed)
   # ────────────────────────────────────────────────────────────────
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.4.7
     container_name: soc-ollama
     restart: unless-stopped
     volumes:
@@ -268,7 +251,7 @@ services:
   # OLLAMA MODEL PULLER (runs once, then exits)
   # ────────────────────────────────────────────────────────────────
   ollama-init:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.4.7
     container_name: soc-ollama-init
     restart: "no"
     depends_on:
@@ -278,11 +261,12 @@ services:
       - ollama-models:/root/.ollama
     environment:
       - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "Pulling llama3.2:3b (~2 GB, first run only)..."
-        ollama pull llama3.2:3b
+        echo "Pulling ${OLLAMA_MODEL:-llama3.2:3b} (first run only)..."
+        ollama pull ${OLLAMA_MODEL:-llama3.2:3b}
         echo "Model ready."
     networks:
       soc-net:
@@ -314,8 +298,9 @@ services:
       - GRAFANA_URL=http://grafana:3000
       - GRAFANA_USER=${GRAFANA_USER:-admin}
       - GRAFANA_PASS=${GRAFANA_PASSWORD}
-      - CROWDSEC_URL=http://crowdsec:8080
-      - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
+      - OPENCTI_URL=http://opencti:8080/opencti
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - VELOCIRAPTOR_URL=http://velociraptor:8889
       - JWT_SECRET=${JWT_SECRET}
       - PORTAL_USER=${PORTAL_USER:-admin}
       - PORTAL_PASS=${PORTAL_PASS}
@@ -395,29 +380,124 @@ services:
       - soc-portal
 
   # ────────────────────────────────────────────────────────────────
-  # CROWDSEC (collaborative threat intelligence + IDS)
-  # Reads nginx access logs and blocks malicious IPs
+  # OPENCTI DEPENDENCIES
   # ────────────────────────────────────────────────────────────────
-  crowdsec:
-    image: crowdsecurity/crowdsec:latest
-    container_name: soc-crowdsec
+  opencti-redis:
+    image: redis:7.2-alpine
+    container_name: soc-opencti-redis
     restart: unless-stopped
-    environment:
-      - GID=1000
-      - COLLECTIONS=crowdsecurity/nginx crowdsecurity/linux
     volumes:
-      - ./configs/crowdsec/acquis.yaml:/etc/crowdsec/acquis.d/nginx.yaml:ro
-      - crowdsec-data:/var/lib/crowdsec/data
-      # SECURITY NOTE: Docker socket gives container-level read access to all
-      # container metadata and env vars. Required here because Windows Docker
-      # Desktop cannot use file-based log tailing (symlink seek limitation).
-      # On a Linux production host, switch acquis.yaml to `source: file` pointing
-      # to nginx-logs volume and remove this mount entirely.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - opencti-redis-data:/data
     networks:
       soc-net:
-        ipv4_address: 172.20.0.30
+        ipv4_address: 172.20.0.31
+
+  opencti-rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: soc-opencti-rabbitmq
+    restart: unless-stopped
+    environment:
+      - RABBITMQ_DEFAULT_USER=${OPENCTI_RABBITMQ_USER:-opencti}
+      - RABBITMQ_DEFAULT_PASS=${OPENCTI_RABBITMQ_PASS:-opencti}
+    volumes:
+      - opencti-rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      soc-net:
+        ipv4_address: 172.20.0.32
+
+  opencti-minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: soc-opencti-minio
+    restart: unless-stopped
+    command: server /data
+    environment:
+      - MINIO_ROOT_USER=${OPENCTI_MINIO_USER:-opencti}
+      - MINIO_ROOT_PASSWORD=${OPENCTI_MINIO_PASS:-openctipass}
+    volumes:
+      - opencti-minio-data:/data
+    networks:
+      soc-net:
+        ipv4_address: 172.20.0.33
+
+  opencti-elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
+    container_name: soc-opencti-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile:  { soft: 65536, hard: 65536 }
+    volumes:
+      - opencti-elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      soc-net:
+        ipv4_address: 172.20.0.34
+
+  # ────────────────────────────────────────────────────────────────
+  # OPENCTI (threat intelligence platform)
+  # ────────────────────────────────────────────────────────────────
+  opencti:
+    image: opencti/platform:6.1.2
+    container_name: soc-opencti
+    restart: unless-stopped
+    environment:
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - APP__PORT=8080
+      - APP__BASE_PATH=/opencti
+      - APP__BASE_URL=http://opencti:8080/opencti
+      - APP__ADMIN__EMAIL=${OPENCTI_ADMIN_EMAIL:-admin@soc.local}
+      - APP__ADMIN__PASSWORD=${OPENCTI_ADMIN_PASSWORD:-ChangeThisOpenCTI1!}
+      - APP__ADMIN__TOKEN=${OPENCTI_ADMIN_TOKEN:-00000000-0000-0000-0000-000000000000}
+      - APP__APP_LOGS__LOGS_LEVEL=error
+      - REDIS__HOSTNAME=opencti-redis
+      - REDIS__PORT=6379
+      - ELASTICSEARCH__URL=http://opencti-elasticsearch:9200
+      - MINIO__ENDPOINT=opencti-minio
+      - MINIO__PORT=9000
+      - MINIO__USE_SSL=false
+      - MINIO__ACCESS_KEY=${OPENCTI_MINIO_USER:-opencti}
+      - MINIO__SECRET_KEY=${OPENCTI_MINIO_PASS:-openctipass}
+      - RABBITMQ__HOSTNAME=opencti-rabbitmq
+      - RABBITMQ__PORT=5672
+      - RABBITMQ__USERNAME=${OPENCTI_RABBITMQ_USER:-opencti}
+      - RABBITMQ__PASSWORD=${OPENCTI_RABBITMQ_PASS:-opencti}
+    networks:
+      soc-net:
+        ipv4_address: 172.20.0.35
     depends_on:
-      - nginx
-      - grafana
-      - wazuh-dashboard
+      - opencti-redis
+      - opencti-rabbitmq
+      - opencti-minio
+      - opencti-elasticsearch
+
+  # ────────────────────────────────────────────────────────────────
+  # VELOCIRAPTOR (endpoint visibility & DFIR)
+  # GUI: https://<server-ip>:8889  (direct, own TLS)
+  # Agent enrollment port: 8001
+  # ────────────────────────────────────────────────────────────────
+  velociraptor:
+    image: velocidex/velociraptor:v0.7.0-4
+    container_name: soc-velociraptor
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /velociraptor/server.config.yaml ]; then
+          velociraptor config generate > /velociraptor/server.config.yaml
+          velociraptor --config /velociraptor/server.config.yaml \
+            user add admin ${VELOCIRAPTOR_ADMIN_PASSWORD:-ChangeThisVelo1!} --role administrator
+        fi
+        exec velociraptor --config /velociraptor/server.config.yaml frontend -v
+    environment:
+      - VELOCIRAPTOR_ADMIN_PASSWORD=${VELOCIRAPTOR_ADMIN_PASSWORD:-ChangeThisVelo1!}
+    volumes:
+      - velociraptor-data:/velociraptor
+    ports:
+      - "8889:8889"
+      - "8001:8001"
+    networks:
+      soc-net:
+        ipv4_address: 172.20.0.16
