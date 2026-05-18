@@ -8,8 +8,23 @@ const IDX_URL    = process.env.WAZUH_INDEXER_URL   || 'https://localhost:9200';
 const IDX_USER   = process.env.WAZUH_INDEXER_USER  || 'admin';
 const IDX_PASS   = process.env.WAZUH_INDEXER_PASS  || 'SecurePassword1!';
 
-// Ignore self-signed certs inside Docker
-const agent = new https.Agent({ rejectUnauthorized: false });
+// TLS agent: by default rejects unauthorized certs.
+// Set WAZUH_TLS_SKIP_VERIFY=true in .env ONLY for local dev with self-signed certs.
+// In production, mount the Wazuh CA and set WAZUH_CA_CERT=/path/to/root-ca.pem
+const fs = require('fs');
+function buildTlsAgent() {
+  const skip = process.env.WAZUH_TLS_SKIP_VERIFY === 'true';
+  if (skip) {
+    console.warn('[SECURITY] WAZUH_TLS_SKIP_VERIFY=true — TLS certificate validation is disabled. Do not use in production.');
+    return new https.Agent({ rejectUnauthorized: false });
+  }
+  const caPath = process.env.WAZUH_CA_CERT;
+  if (caPath && fs.existsSync(caPath)) {
+    return new https.Agent({ ca: fs.readFileSync(caPath) });
+  }
+  return new https.Agent(); // default: validates against system CA bundle
+}
+const agent = buildTlsAgent();
 
 let _token = null;
 let _tokenExp = 0;
@@ -54,8 +69,9 @@ async function indexerQuery(index, body) {
 // ── Public API ────────────────────────────────────────────────
 
 async function getAgents() {
-  const data = await wazuhGet('/agents?limit=500&select=id,name,ip,status,os,lastKeepAlive,version');
-  return data?.data?.affected_items || [];
+  const fields = 'id,name,ip,status,os.name,os.platform,os.version,os.arch,lastKeepAlive,version,manager,dateAdd';
+  const data = await wazuhGet(`/agents?limit=500&select=${fields}`);
+  return (data?.data?.affected_items || []).filter(a => a.id !== '000');
 }
 
 async function getManagerInfo() {

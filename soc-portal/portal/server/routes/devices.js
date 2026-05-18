@@ -1,5 +1,5 @@
 const express = require('express');
-const { auth } = require('./auth');
+const { auth, adminOnly } = require('./auth');
 const devices = require('../db/devices');
 
 const router = express.Router();
@@ -42,7 +42,7 @@ router.patch('/:id', auth, (req, res) => {
   }
 });
 
-router.delete('/:id', auth, (req, res) => {
+router.delete('/:id', auth, adminOnly, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const deleted = devices.deleteDevice(id);

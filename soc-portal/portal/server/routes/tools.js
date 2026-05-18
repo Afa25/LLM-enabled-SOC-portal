@@ -16,7 +16,7 @@ const TOOLS = [
     internalUrl: 'http://wazuh-dashboard:5601',
     path: '/wazuh/',
     externalPath: '/wazuh/',
-    credentials: { user: 'admin', pass: 'SecurePassword1!' },
+    loginHint: 'Use your Wazuh admin credentials from .env',
     color: 'blue',
     hasUI: true,
   },
@@ -28,7 +28,7 @@ const TOOLS = [
     internalUrl: 'http://grafana:3000',
     path: '/api/health',
     externalPath: '/grafana/',
-    credentials: { user: 'admin', pass: 'SocGrafana1!' },
+    loginHint: 'Use your Grafana admin credentials from .env',
     color: 'orange',
     hasUI: true,
   },
@@ -40,7 +40,7 @@ const TOOLS = [
     internalUrl: 'http://prometheus:9090',
     path: '/prometheus/-/healthy',
     externalPath: '/prometheus/',
-    credentials: null,
+    loginHint: null,
     color: 'red',
     hasUI: true,
   },
@@ -51,12 +51,12 @@ const TOOLS = [
     description: 'Greenbone vulnerability scanner. Run network-wide vulnerability assessments.',
     internalUrl: 'http://openvas:9392',
     path: '/',
-    externalPath: '/openvas/',
-    credentials: { user: 'admin', pass: 'SecureOpenVAS1!' },
+    externalPath: 'http://localhost:9392',
+    loginHint: 'Use your OpenVAS admin credentials from .env',
     color: 'green',
     hasUI: true,
     startCmd: 'docker compose --env-file .env up -d openvas',
-    note: 'First start takes 10–20 min for NVT feed sync.',
+    note: 'First start takes 10–20 min for NVT feed sync. Opens on direct port — no sub-path proxy.',
   },
   {
     id: 'ollama',
@@ -82,8 +82,7 @@ const TOOLS = [
     credentials: null,
     color: 'cyan',
     hasUI: false,
-    note: 'No web interface. Logs available via: docker exec soc-zeek ls /usr/local/zeek/logs/current/',
-    startCmd: '(Not supported on Windows Docker Engine — requires network_mode: host)',
+    note: 'Not supported on Windows Docker Desktop — network_mode: host is unavailable. Requires a Linux host with native Docker to capture host network traffic.',
   },
   {
     id: 'suricata',
@@ -96,8 +95,7 @@ const TOOLS = [
     credentials: null,
     color: 'yellow',
     hasUI: false,
-    note: 'No web interface. Logs available via: docker exec soc-suricata cat /var/log/suricata/eve.json',
-    startCmd: '(Not supported on Windows Docker Engine — requires network_mode: host)',
+    note: 'Not supported on Windows Docker Desktop — network_mode: host is unavailable. Requires a Linux host with native Docker to capture host network traffic.',
   },
 ];
 
@@ -108,6 +106,7 @@ router.get('/', auth, async (req, res) => {
       const base = { ...tool };
       delete base.internalUrl;
       delete base.path;
+      delete base.credentials; // never expose credentials to the client
 
       if (!tool.internalUrl) {
         return { ...base, status: 'no-ui' };

@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+node_modules/
+
+# Claude Code
+.claude/
+
+# Generated TLS certificates (private keys must never be committed)
+configs/nginx/certs/*.key
+configs/nginx/certs/*.crt

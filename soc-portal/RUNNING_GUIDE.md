@@ -222,7 +222,7 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost/api/stats
 
 | Interface | URL | Username | Password |
 |-----------|-----|----------|----------|
-| **SOC Portal** | http://localhost | `admin` | `SocPortal1!` |
+| **SOC Portal** | http://localhost | `admin` | `` |
 | **Grafana** | http://localhost/grafana | `admin` | `SocGrafana1!` |
 | **Wazuh Dashboard** | http://localhost/wazuh | `admin` | `SecurePassword1!` |
 

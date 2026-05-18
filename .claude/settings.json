@@ -27,7 +27,18 @@
       "Read(//c/Users/Hp/AppData/Local/Temp/claude/c--Users-Hp-Desktop-LLM-enabled-SOC-portal/61bda930-b7ed-4d6b-bf7b-60f60ecd8955/tasks/**)",
       "Bash(docker rm *)",
       "Bash(curl -sk -o /dev/null -w \"HTTP %{http_code}\" http://localhost:9392/)",
-      "Bash(curl -sk -o /dev/null -w \"HTTP %{http_code}\" https://localhost:9392/)"
+      "Bash(curl -sk -o /dev/null -w \"HTTP %{http_code}\" https://localhost:9392/)",
+      "Bash(DOCKER_HOST=\"npipe:////./pipe/dockerDesktopLinuxEngine\" docker ps --format \"{{.Names}}\\\\t{{.Status}}\")",
+      "PowerShell(New-NetFirewallRule -DisplayName \"SOC Portal HTTP\" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -Profile Any 2>&1)",
+      "Bash(Test-Path \"c:\\\\Users\\\\Hp\\\\Desktop\\\\LLM-enabled-SOC-portal\\\\soc-portal\\\\.env.example\")",
+      "Bash(curl -sk https://localhost/ -o /dev/null -w \"%{http_code}\")",
+      "Bash(curl -s http://localhost/ -o /dev/null -w \"%{http_code}\")",
+      "Bash(netstat -ano)",
+      "PowerShell(Get-Process -Id 8592 2>$null | Select-Object Id,Name; \\(netstat -ano | Select-String \"LISTENING\"\\) | Select-String \":443 \" | Select-Object -First 5)",
+      "Bash(tasklist /FI \"PID eq 8592\")",
+      "Bash(findstr \"LISTENING\")",
+      "Bash(findstr \":443 \")",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://localhost\" -SkipCertificateCheck -TimeoutSec 5; \"HTTP $\\($r.StatusCode\\) - $\\(\\($r.Content\\).Substring\\(0,[Math]::Min\\(100,$r.Content.Length\\)\\)\\)\" } catch { \"Error: $_\" })"
     ],
     "additionalDirectories": [
       "\\tmp",

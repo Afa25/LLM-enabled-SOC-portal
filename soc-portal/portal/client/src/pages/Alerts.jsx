@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { usePageState } from '../App';
 import { useAuth } from '../App';
 import { ShieldAlert, ChevronDown, ChevronUp, Filter, RefreshCw } from 'lucide-react';
 
@@ -76,12 +77,15 @@ function AlertRow({ alert }) {
 
 export default function Alerts() {
   const { apiFetch } = useAuth();
-  const [alerts,  setAlerts]  = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [level,   setLevel]   = useState('');
-  const [limit,   setLimit]   = useState('100');
-  const [from,    setFrom]    = useState('');
-  const [to,      setTo]      = useState('');
+  const [ps, setPs] = usePageState('alerts', { alerts: [], level: '', limit: '100', from: '', to: '' });
+  const { alerts, level, limit, from, to } = ps;
+  const [loading, setLoading] = useState(!ps.alerts.length);
+
+  const setAlerts = v => setPs(p => ({ ...p, alerts: typeof v === 'function' ? v(p.alerts) : v }));
+  const setLevel  = v => setPs(p => ({ ...p, level:  typeof v === 'function' ? v(p.level)  : v }));
+  const setLimit  = v => setPs(p => ({ ...p, limit:  typeof v === 'function' ? v(p.limit)  : v }));
+  const setFrom   = v => setPs(p => ({ ...p, from:   typeof v === 'function' ? v(p.from)   : v }));
+  const setTo     = v => setPs(p => ({ ...p, to:     typeof v === 'function' ? v(p.to)     : v }));
 
   async function load() {
     setLoading(true);

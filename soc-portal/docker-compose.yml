@@ -18,9 +18,14 @@ volumes:
   prometheus-data:
   ollama-models:
   portal-db:
+  portal-backups:
   openvas-data:
   zeek-logs:
   suricata-logs:
+  nginx-logs:
+  nginx-certs:
+  crowdsec-data:
+  wazuh-dashboard-config:
 
 services:
 
@@ -64,13 +69,13 @@ services:
     environment:
       - INDEXER_URL=https://wazuh-indexer:9200
       - INDEXER_USERNAME=admin
-      - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD:-SecurePassword1!}
+      - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD}
       - FILEBEAT_SSL_VERIFICATION_MODE=none
       - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
       - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
       - SSL_KEY=/etc/ssl/filebeat-key.pem
       - API_USERNAME=wazuh-wui
-      - API_PASSWORD=${WAZUH_API_PASSWORD:-SecurePassword1!}
+      - API_PASSWORD=${WAZUH_API_PASSWORD}
     volumes:
       - wazuh-manager-data:/var/ossec/data
       - wazuh-logs:/var/ossec/logs
@@ -100,15 +105,16 @@ services:
     hostname: wazuh-dashboard
     environment:
       - INDEXER_USERNAME=admin
-      - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD:-SecurePassword1!}
+      - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD}
       - WAZUH_API_URL=https://wazuh-manager
       - DASHBOARD_USERNAME=kibanaserver
-      - DASHBOARD_PASSWORD=${WAZUH_DASHBOARD_PASSWORD:-SecurePassword1!}
+      - DASHBOARD_PASSWORD=${WAZUH_DASHBOARD_PASSWORD}
       - API_USERNAME=wazuh-wui
-      - API_PASSWORD=${WAZUH_API_PASSWORD:-SecurePassword1!}
+      - API_PASSWORD=${WAZUH_API_PASSWORD}
     volumes:
       - ./configs/wazuh/dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml:ro
       - ./configs/wazuh/certs:/usr/share/wazuh-dashboard/certs:ro
+      - wazuh-dashboard-config:/usr/share/wazuh-dashboard/data/wazuh/config
     networks:
       soc-net:
         ipv4_address: 172.20.0.12
@@ -125,12 +131,18 @@ services:
     restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-SocGrafana1!}
-      - GF_INSTALL_PLUGINS=grafana-opensearch-datasource
-      - GF_SERVER_ROOT_URL=http://localhost/grafana/
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_ANALYTICS_REPORTING_ENABLED=false
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      # SSO — anonymous access gated by Nginx auth_request.
+      # Viewer role: portal users can read dashboards but cannot modify them.
+      # Direct Grafana login (admin credentials from .env) grants full access.
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
     volumes:
       - grafana-data:/var/lib/grafana
       - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -155,7 +167,7 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=30d'
       - '--web.enable-lifecycle'
-      - '--web.external-url=http://localhost/prometheus/'
+      - '--web.external-url=/prometheus/'
       - '--web.route-prefix=/prometheus/'
     volumes:
       - prometheus-data:/prometheus
@@ -222,12 +234,12 @@ services:
     container_name: soc-openvas
     restart: unless-stopped
     environment:
-      - PASSWORD=${OPENVAS_PASSWORD:-SecureOpenVAS1!}
+      - PASSWORD=${OPENVAS_PASSWORD}
       - USERNAME=admin
     volumes:
       - openvas-data:/data
     ports:
-      - "9392:9392"
+      - "127.0.0.1:9392:9392"
     networks:
       soc-net:
         ipv4_address: 172.20.0.16
@@ -289,20 +301,29 @@ services:
       - PORT=4000
       - WAZUH_MANAGER_URL=https://wazuh-manager:55000
       - WAZUH_USER=wazuh-wui
-      - WAZUH_PASS=${WAZUH_API_PASSWORD:-SecurePassword1!}
+      - WAZUH_PASS=${WAZUH_API_PASSWORD}
       - WAZUH_INDEXER_URL=https://wazuh-indexer:9200
       - WAZUH_INDEXER_USER=admin
-      - WAZUH_INDEXER_PASS=${WAZUH_INDEXER_PASSWORD:-SecurePassword1!}
+      - WAZUH_INDEXER_PASS=${WAZUH_INDEXER_PASSWORD}
       - OLLAMA_URL=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
+      # TLS: CA cert is mounted below. Set WAZUH_TLS_SKIP_VERIFY=true in .env
+      # only if you have not yet deployed the Wazuh certs directory.
+      - WAZUH_CA_CERT=/app/certs/root-ca.pem
+      - WAZUH_TLS_SKIP_VERIFY=${WAZUH_TLS_SKIP_VERIFY:-false}
       - GRAFANA_URL=http://grafana:3000
       - GRAFANA_USER=${GRAFANA_USER:-admin}
-      - GRAFANA_PASS=${GRAFANA_PASSWORD:-SocGrafana1!}
-      - JWT_SECRET=${JWT_SECRET:-change-this-secret-in-production}
+      - GRAFANA_PASS=${GRAFANA_PASSWORD}
+      - CROWDSEC_URL=http://crowdsec:8080
+      - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
       - PORTAL_USER=${PORTAL_USER:-admin}
-      - PORTAL_PASS=${PORTAL_PASS:-SocPortal1!}
+      - PORTAL_PASS=${PORTAL_PASS}
     volumes:
       - portal-db:/app/data
+      - suricata-logs:/data/suricata:ro
+      - zeek-logs:/data/zeek:ro
+      - ./configs/wazuh/certs/root-ca.pem:/app/certs/root-ca.pem:ro
     networks:
       soc-net:
         ipv4_address: 172.20.0.21
@@ -312,7 +333,19 @@ services:
       - grafana
 
   # ────────────────────────────────────────────────────────────────
-  # NGINX (reverse proxy — single entry point on port 80)
+  # CERT GENERATOR — runs once, creates self-signed TLS cert if absent
+  # Replace server.crt/server.key with a proper cert for production.
+  # ────────────────────────────────────────────────────────────────
+  certgen:
+    image: alpine
+    container_name: soc-certgen
+    restart: "no"
+    volumes:
+      - nginx-certs:/certs
+    command: sh -c "apk add --no-cache openssl 2>/dev/null && ([ -f /certs/server.crt ] && echo 'Certificate already exists.' || (openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout /certs/server.key -out /certs/server.crt -subj '/CN=soc-portal/O=SOC Platform/C=ZA' && echo 'Self-signed certificate generated.'))"
+
+  # ────────────────────────────────────────────────────────────────
+  # NGINX (reverse proxy — HTTPS on 443, HTTP redirects to HTTPS)
   # ────────────────────────────────────────────────────────────────
   nginx:
     image: nginx:1.25-alpine
@@ -320,12 +353,71 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      # base64("admin:<WAZUH_API_PASSWORD>") — set in .env
+      # Generate: echo -n "admin:YourPassword" | base64
+      - WAZUH_BASIC_AUTH_B64=${WAZUH_BASIC_AUTH_B64}
     volumes:
-      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Template is processed by nginx entrypoint via envsubst on startup
+      - ./configs/nginx/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      # Override built-in default.conf so only our server blocks are active
+      - ./configs/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx-logs:/var/log/nginx
+      - nginx-certs:/etc/nginx/certs:ro
     networks:
       soc-net:
         ipv4_address: 172.20.0.2
     depends_on:
       - soc-portal
+      - certgen
+
+  # ────────────────────────────────────────────────────────────────
+  # PORTAL DB BACKUP — daily snapshot of soc.db, 7-day retention
+  # Backups land in the portal-backups volume.
+  # To restore: docker cp soc-portal-backup:/backups/<file> . && docker cp <file> soc-portal:/app/data/soc.db
+  # ────────────────────────────────────────────────────────────────
+  portal-backup:
+    image: alpine
+    container_name: soc-portal-backup
+    restart: unless-stopped
+    volumes:
+      - portal-db:/data:ro
+      - portal-backups:/backups
+    command: >
+      sh -c "while true; do
+        cp /data/soc.db /backups/soc-$$(date +%Y%m%d-%H%M).db 2>/dev/null || true;
+        find /backups -name 'soc-*.db' -mtime +7 -delete 2>/dev/null || true;
+        echo \"Backup completed at $$(date)\";
+        sleep 86400;
+      done"
+    depends_on:
+      - soc-portal
+
+  # ────────────────────────────────────────────────────────────────
+  # CROWDSEC (collaborative threat intelligence + IDS)
+  # Reads nginx access logs and blocks malicious IPs
+  # ────────────────────────────────────────────────────────────────
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: soc-crowdsec
+    restart: unless-stopped
+    environment:
+      - GID=1000
+      - COLLECTIONS=crowdsecurity/nginx crowdsecurity/linux
+    volumes:
+      - ./configs/crowdsec/acquis.yaml:/etc/crowdsec/acquis.d/nginx.yaml:ro
+      - crowdsec-data:/var/lib/crowdsec/data
+      # SECURITY NOTE: Docker socket gives container-level read access to all
+      # container metadata and env vars. Required here because Windows Docker
+      # Desktop cannot use file-based log tailing (symlink seek limitation).
+      # On a Linux production host, switch acquis.yaml to `source: file` pointing
+      # to nginx-logs volume and remove this mount entirely.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      soc-net:
+        ipv4_address: 172.20.0.30
+    depends_on:
+      - nginx
       - grafana
       - wazuh-dashboard

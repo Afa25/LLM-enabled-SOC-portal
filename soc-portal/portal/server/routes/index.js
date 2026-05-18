@@ -11,6 +11,9 @@ const pairingRoutes = require('./pairing');
 const triageRoutes  = require('./triage');
 const chatRoutes    = require('./chat');
 const toolsRoutes   = require('./tools');
+const netdataRoutes  = require('./netdata');
+const crowdsecRoutes  = require('./crowdsec');
+const settingsRoutes  = require('./settings');
 
 const router = express.Router();
 
@@ -26,5 +29,8 @@ router.use('/pairing',  pairingRoutes);
 router.use('/triage',   triageRoutes);
 router.use('/chat',     chatRoutes);
 router.use('/tools',    toolsRoutes);
+router.use('/netdata',   netdataRoutes);
+router.use('/crowdsec', crowdsecRoutes);
+router.use('/settings', settingsRoutes);
 
 module.exports = router;

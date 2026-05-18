@@ -17,7 +17,7 @@ router.get('/', auth, (req, res) => {
 });
 
 // Create
-router.post('/', auth, (req, res) => {
+router.post('/', auth, adminOnly, (req, res) => {
   const { name, timeframe, cron_expr, model = 'llama3.2:3b' } = req.body;
   if (!name || !timeframe) return res.status(400).json({ error: 'name and timeframe required' });
 
@@ -33,7 +33,7 @@ router.post('/', auth, (req, res) => {
 });
 
 // Update
-router.put('/:id', auth, (req, res) => {
+router.put('/:id', auth, adminOnly, (req, res) => {
   const { name, timeframe, cron_expr, model, enabled } = req.body;
   const id = req.params.id;
   const s  = db.get().prepare('SELECT * FROM schedules WHERE id = ?').get(id);
@@ -61,7 +61,7 @@ router.delete('/:id', auth, adminOnly, (req, res) => {
 });
 
 // Run now (manual trigger)
-router.post('/:id/run', auth, async (req, res) => {
+router.post('/:id/run', auth, adminOnly, async (req, res) => {
   const s = db.get().prepare('SELECT * FROM schedules WHERE id = ?').get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Not found' });
   res.json({ message: 'Report generation triggered' });

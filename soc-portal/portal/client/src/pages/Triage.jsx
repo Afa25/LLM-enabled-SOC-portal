@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../App';
+import { useAuth, usePageState } from '../App';
 import {
   ShieldAlert, ShieldCheck, ShieldQuestion, Brain, Loader,
   CheckCircle, XCircle, RefreshCw, ChevronRight, AlertTriangle,
@@ -244,14 +244,17 @@ function ResultCard({ result }) {
 // ── Main page ─────────────────────────────────────────────────
 export default function Triage() {
   const { apiFetch } = useAuth();
-  const [queue,    setQueue]    = useState([]);
-  const [results,  setResults]  = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [tab,      setTab]      = useState('queue');
-  const [filter,   setFilter]   = useState('all');
-  const [analyzing, setAnalyzing] = useState(new Set()); // alert _ids
+  const [ps, setPs] = usePageState('triage', { queue: [], results: [], tab: 'queue', filter: 'all' });
+  const { queue, results, tab, filter } = ps;
+  const [loading,  setLoading]  = useState(!ps.queue.length && !ps.results.length);
+  const [analyzing, setAnalyzing] = useState(new Set());
   const [analyzeAllRunning, setAnalyzeAllRunning] = useState(false);
   const [analyzeAllProgress, setAnalyzeAllProgress] = useState({ done: 0, total: 0 });
+
+  const setQueue   = v => setPs(p => ({ ...p, queue:   typeof v === 'function' ? v(p.queue)   : v }));
+  const setResults = v => setPs(p => ({ ...p, results: typeof v === 'function' ? v(p.results) : v }));
+  const setTab     = v => setPs(p => ({ ...p, tab:     typeof v === 'function' ? v(p.tab)     : v }));
+  const setFilter  = v => setPs(p => ({ ...p, filter:  typeof v === 'function' ? v(p.filter)  : v }));
 
   const load = useCallback(async () => {
     setLoading(true);

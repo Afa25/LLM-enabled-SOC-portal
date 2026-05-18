@@ -1,37 +1,50 @@
-events { worker_connections 1024; }
-
-http {
-  include      /etc/nginx/mime.types;
-  default_type application/octet-stream;
-  sendfile     on;
-  gzip         on;
-  gzip_types   text/plain text/css application/json application/javascript text/xml application/xml;
-
   # Docker internal DNS
   resolver 127.0.0.11 valid=30s ipv6=off;
   resolver_timeout 5s;
 
   # Write logs to volume so CrowdSec can read them
   access_log /var/log/nginx/access.log;
-  error_log  /var/log/nginx/error.log warn;
+
+  gzip       on;
+  gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
 
   limit_req_zone $binary_remote_addr zone=portal:10m rate=30r/m;
   limit_req_zone $binary_remote_addr zone=api:10m    rate=120r/m;
 
-  # Wazuh admin credentials (base64 of admin:SecurePassword1!)
-  # Used by Nginx to inject basic-auth after SSO validation
+  # Wazuh admin credentials injected from .env at container startup via envsubst.
+  # Set WAZUH_BASIC_AUTH_B64 = base64("admin:<WAZUH_API_PASSWORD>")
   map $host $wazuh_basic_auth {
-    default "Basic YWRtaW46U2VjdXJlUGFzc3dvcmQxIQ==";
+    default "Basic ${WAZUH_BASIC_AUTH_B64}";
   }
 
+  # ── HTTP → HTTPS redirect ─────────────────────────────────────
   server {
     listen 80;
     server_name _;
+    return 301 https://$host$request_uri;
+  }
+
+  # ── HTTPS ─────────────────────────────────────────────────────
+  server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/certs/server.crt;
+    ssl_certificate_key /etc/nginx/certs/server.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options           SAMEORIGIN                            always;
+    add_header X-Content-Type-Options    nosniff                               always;
+    add_header X-XSS-Protection          "1; mode=block"                       always;
+    add_header Referrer-Policy           "strict-origin-when-cross-origin"     always;
 
     # ─────────────────────────────────────────────────────────────
     # INTERNAL — portal SSO validation endpoint (nginx auth_request)
-    # Subrequest forwards the browser's Cookie header automatically.
-    # Returns 200 + X-Auth-User header on success, 401 on failure.
     # ─────────────────────────────────────────────────────────────
     location = /auth-check {
       internal;
@@ -43,7 +56,6 @@ http {
       proxy_read_timeout      5s;
     }
 
-    # ── Redirect unauthenticated external-service requests to portal login ──
     location @sso_login {
       return 302 /login?next=$request_uri;
     }
@@ -56,6 +68,7 @@ http {
       proxy_set_header   Host              $host;
       proxy_set_header   X-Real-IP         $remote_addr;
       proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+      proxy_set_header   X-Forwarded-Proto $scheme;
       proxy_read_timeout 300s;
     }
 
@@ -64,16 +77,15 @@ http {
       limit_req zone=api burst=50 nodelay;
       set $upstream_portal http://soc-portal:4000;
       proxy_pass         $upstream_portal;
-      proxy_set_header   Host            $host;
-      proxy_set_header   X-Real-IP       $remote_addr;
+      proxy_set_header   Host              $host;
+      proxy_set_header   X-Real-IP         $remote_addr;
+      proxy_set_header   X-Forwarded-Proto $scheme;
       proxy_read_timeout 360s;
       proxy_buffering    off;
       proxy_cache        off;
     }
 
     # ── Grafana ───────────────────────────────────────────────
-    # SSO: auth_request validates portal cookie, then injects
-    # X-Webauth-User so Grafana proxy-auth logs the user in automatically.
     location /grafana/ {
       auth_request      /auth-check;
       error_page 401 = @sso_login;
@@ -87,10 +99,6 @@ http {
     }
 
     # ── Wazuh Dashboard ───────────────────────────────────────
-    # SSO: auth_request validates portal cookie, then Nginx injects
-    # Basic auth so Wazuh Dashboard auto-authenticates the request.
-    # requestHeadersAllowlist in opensearch_dashboards.yml already
-    # includes "Authorization", so this header is forwarded to OpenSearch.
     location /wazuh/ {
       auth_request      /auth-check;
       error_page 401 = @sso_login;
@@ -104,7 +112,6 @@ http {
     }
 
     # ── Prometheus ────────────────────────────────────────────
-    # SSO: gate behind portal auth (Prometheus has no built-in auth).
     location /prometheus/ {
       auth_request      /auth-check;
       error_page 401 = @sso_login;
@@ -115,4 +122,3 @@ http {
       proxy_set_header X-Real-IP  $remote_addr;
     }
   }
-}

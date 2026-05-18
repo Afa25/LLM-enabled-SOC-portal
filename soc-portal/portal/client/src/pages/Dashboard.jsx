@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../App';
+import { useAuth, usePageState } from '../App';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { ShieldAlert, Monitor, AlertTriangle, Activity, Clock, TrendingUp, CheckCircle, XCircle } from 'lucide-react';
+import {
+  ShieldAlert, Monitor, AlertTriangle, Activity, Clock,
+  TrendingUp, CheckCircle, XCircle, Cpu, MemoryStick,
+  HardDrive, Network, Wifi, AlertOctagon
+} from 'lucide-react';
 
 const LEVEL_COLORS = {
   critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#22c55e'
@@ -13,6 +17,8 @@ function StatCard({ icon: Icon, label, value, sub, color = 'blue', loading }) {
     red:    'bg-red-600/10  text-red-400  border-red-600/20',
     orange: 'bg-orange-600/10 text-orange-400 border-orange-600/20',
     green:  'bg-green-600/10 text-green-400 border-green-600/20',
+    purple: 'bg-purple-600/10 text-purple-400 border-purple-600/20',
+    cyan:   'bg-cyan-600/10 text-cyan-400 border-cyan-600/20',
   };
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
@@ -33,12 +39,43 @@ function StatCard({ icon: Icon, label, value, sub, color = 'blue', loading }) {
   );
 }
 
+// Gauge bar component used for Prometheus metrics
+function GaugeBar({ label, value, unit = '%', color = '#3b82f6' }) {
+  const pct = Math.min(Math.max(value ?? 0, 0), 100);
+  const barColor = pct > 85 ? '#ef4444' : pct > 65 ? '#f97316' : color;
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1">
+        <span className="text-gray-400">{label}</span>
+        <span className="text-white font-medium">
+          {value != null ? `${value}${unit}` : '—'}
+        </span>
+      </div>
+      <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${pct}%`, background: barColor }}
+        />
+      </div>
+    </div>
+  );
+}
+
+const SURI_SEVERITY = { 1: { label: 'Critical', color: 'text-red-400' }, 2: { label: 'High', color: 'text-orange-400' }, 3: { label: 'Medium', color: 'text-yellow-400' } };
+
 export default function Dashboard() {
   const { apiFetch } = useAuth();
-  const [stats,   setStats]   = useState(null);
-  const [hours,   setHours]   = useState(24);
-  const [loading, setLoading] = useState(true);
-  const [health,  setHealth]  = useState([]);
+  const [ps, setPs] = usePageState('dashboard', { stats: null, hours: 24, health: [], promData: null, suriData: null, zeekData: null });
+  const { stats, hours, health, promData, suriData, zeekData } = ps;
+  const [loading,    setLoading]    = useState(!ps.stats);
+  const [netLoading, setNetLoading] = useState(!ps.promData);
+
+  const setStats    = v => setPs(p => ({ ...p, stats:    typeof v === 'function' ? v(p.stats)    : v }));
+  const setHours    = v => setPs(p => ({ ...p, hours:    typeof v === 'function' ? v(p.hours)    : v }));
+  const setHealth   = v => setPs(p => ({ ...p, health:   typeof v === 'function' ? v(p.health)   : v }));
+  const setPromData = v => setPs(p => ({ ...p, promData: typeof v === 'function' ? v(p.promData) : v }));
+  const setSuriData = v => setPs(p => ({ ...p, suriData: typeof v === 'function' ? v(p.suriData) : v }));
+  const setZeekData = v => setPs(p => ({ ...p, zeekData: typeof v === 'function' ? v(p.zeekData) : v }));
 
   async function load() {
     setLoading(true);
@@ -46,18 +83,37 @@ export default function Dashboard() {
       apiFetch(`/api/stats?hours=${hours}`),
       apiFetch('/api/health/endpoints')
     ]);
-    const data = await res?.json();
+    const data  = await res?.json();
     const hdata = await hres?.json();
     setStats(data);
     setHealth(Array.isArray(hdata) ? hdata : []);
     setLoading(false);
   }
 
-  useEffect(() => { load(); const iv = setInterval(load, 60_000); return () => clearInterval(iv); }, [hours]);
+  async function loadNetdata() {
+    setNetLoading(true);
+    const [pr, sr, zr] = await Promise.all([
+      apiFetch('/api/netdata/prometheus'),
+      apiFetch('/api/netdata/suricata'),
+      apiFetch('/api/netdata/zeek'),
+    ]);
+    setPromData(await pr?.json());
+    setSuriData(await sr?.json());
+    setZeekData(await zr?.json());
+    setNetLoading(false);
+  }
 
-  const byLevel = stats?.summary?.by_level || [];
-  const critical = byLevel.filter(b => b.key >= 12).reduce((s,b) => s+b.doc_count, 0);
-  const high     = byLevel.filter(b => b.key >= 7 && b.key < 12).reduce((s,b) => s+b.doc_count, 0);
+  useEffect(() => {
+    load();
+    loadNetdata();
+    const iv1 = setInterval(load, 60_000);
+    const iv2 = setInterval(loadNetdata, 30_000);
+    return () => { clearInterval(iv1); clearInterval(iv2); };
+  }, [hours]);
+
+  const byLevel  = stats?.summary?.by_level || [];
+  const critical = byLevel.filter(b => b.key >= 12).reduce((s, b) => s + b.doc_count, 0);
+  const high     = byLevel.filter(b => b.key >= 7 && b.key < 12).reduce((s, b) => s + b.doc_count, 0);
 
   const overTime = (stats?.summary?.over_time || []).map(b => ({
     time:   new Date(b.key_as_string).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -71,8 +127,24 @@ export default function Dashboard() {
 
   const agentPie = (stats?.summary?.by_agent || []).slice(0, 5).map((b, i) => ({
     name:  b.key, value: b.doc_count,
-    fill:  ['#3b82f6','#8b5cf6','#f97316','#22c55e','#ef4444'][i]
+    fill:  ['#3b82f6', '#8b5cf6', '#f97316', '#22c55e', '#ef4444'][i]
   }));
+
+  // Format bytes nicely
+  function fmtBytes(n) {
+    if (n == null) return '—';
+    if (n < 1024) return `${n} B`;
+    if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1048576).toFixed(1)} MB`;
+  }
+
+  function fmtUptime(s) {
+    if (s == null) return '—';
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return `${d}d ${h}h ${m}m`;
+  }
 
   return (
     <div className="space-y-6">
@@ -89,7 +161,7 @@ export default function Dashboard() {
               {h < 24 ? `${h}h` : h === 24 ? '24h' : h === 48 ? '2d' : '7d'}
             </button>
           ))}
-          <button onClick={load} className="px-3 py-1.5 rounded-lg text-xs bg-gray-800 text-gray-400 hover:bg-gray-700 transition-colors">
+          <button onClick={() => { load(); loadNetdata(); }} className="px-3 py-1.5 rounded-lg text-xs bg-gray-800 text-gray-400 hover:bg-gray-700 transition-colors">
             ↻ Refresh
           </button>
         </div>
@@ -97,10 +169,10 @@ export default function Dashboard() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={ShieldAlert}   label="Total Alerts"         value={stats?.summary?.total}    sub={`Last ${hours}h`}             color="blue"   loading={loading} />
-        <StatCard icon={AlertTriangle} label="Critical (Lv 12+)"   value={critical}                 sub="Immediate attention required"  color="red"    loading={loading} />
-        <StatCard icon={TrendingUp}    label="High Severity"        value={high}                     sub="Investigation recommended"     color="orange" loading={loading} />
-        <StatCard icon={Monitor}       label="Active Agents"        value={stats?.agents?.active}    sub={`${stats?.agents?.inactive || 0} inactive`} color="green" loading={loading} />
+        <StatCard icon={ShieldAlert}   label="Total Alerts"       value={stats?.summary?.total}   sub={`Last ${hours}h`}            color="blue"   loading={loading} />
+        <StatCard icon={AlertTriangle} label="Critical (Lv 12+)" value={critical}                 sub="Immediate attention required" color="red"    loading={loading} />
+        <StatCard icon={TrendingUp}    label="High Severity"      value={high}                     sub="Investigation recommended"   color="orange" loading={loading} />
+        <StatCard icon={Monitor}       label="Active Agents"      value={stats?.agents?.active}    sub={`${stats?.agents?.inactive || 0} inactive`} color="green" loading={loading} />
       </div>
 
       {/* Charts row */}
@@ -142,6 +214,182 @@ export default function Dashboard() {
               </ResponsiveContainer>
           }
         </div>
+      </div>
+
+      {/* ── PROMETHEUS SYSTEM METRICS ────────────────────────────── */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <Activity size={18} className="text-red-400" />
+            <h3 className="text-white font-semibold">System Metrics</h3>
+            <span className="text-xs text-gray-600 ml-1">via Prometheus</span>
+          </div>
+          {promData?.available === false && (
+            <span className="text-xs text-gray-600 bg-gray-800 px-2 py-1 rounded">node-exporter offline</span>
+          )}
+        </div>
+
+        {netLoading ? (
+          <div className="h-24 bg-gray-800 rounded animate-pulse" />
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* Resource gauges */}
+            <div className="space-y-4">
+              <GaugeBar label="CPU Usage"    value={promData?.cpu_pct}  color="#3b82f6" />
+              <GaugeBar label="Memory Usage" value={promData?.mem_pct}  color="#8b5cf6" />
+              <GaugeBar label="Disk Usage"   value={promData?.disk_pct} color="#f97316" />
+            </div>
+
+            {/* Network throughput */}
+            <div className="space-y-3">
+              <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Network</p>
+              <div className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-lg">
+                <Network size={16} className="text-blue-400 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-gray-500">Inbound</p>
+                  <p className="text-sm font-medium text-white">
+                    {promData?.net_rx_kbs != null ? `${promData.net_rx_kbs.toFixed(1)} KB/s` : '—'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-lg">
+                <Network size={16} className="text-green-400 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-gray-500">Outbound</p>
+                  <p className="text-sm font-medium text-white">
+                    {promData?.net_tx_kbs != null ? `${promData.net_tx_kbs.toFixed(1)} KB/s` : '—'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Uptime */}
+            <div className="space-y-3">
+              <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Host</p>
+              <div className="p-3 bg-gray-800/50 rounded-lg">
+                <p className="text-xs text-gray-500">Uptime</p>
+                <p className="text-lg font-bold text-white mt-0.5">{fmtUptime(promData?.uptime_s)}</p>
+              </div>
+              <a href="/prometheus/" target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-center gap-1.5 w-full py-2 text-xs text-red-400 border border-red-900/40 rounded-lg hover:bg-red-900/10 transition-colors">
+                Open Prometheus →
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── SURICATA IDS ALERTS ───────────────────────────────────── */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <AlertOctagon size={18} className="text-yellow-400" />
+            <h3 className="text-white font-semibold">Suricata IDS Alerts</h3>
+            <span className="text-xs text-gray-600 ml-1">live from eve.json</span>
+          </div>
+          {suriData && (
+            <span className="text-xs text-gray-500">{suriData.alerts?.length ?? 0} recent</span>
+          )}
+        </div>
+
+        {netLoading ? (
+          <div className="h-24 bg-gray-800 rounded animate-pulse" />
+        ) : !suriData?.available ? (
+          <div className="text-center py-8">
+            <AlertOctagon size={28} className="text-gray-700 mx-auto mb-2" />
+            <p className="text-gray-600 text-sm">Suricata log not found.</p>
+            <p className="text-gray-700 text-xs mt-1">Suricata requires a Linux host with network_mode: host.</p>
+          </div>
+        ) : suriData.alerts.length === 0 ? (
+          <p className="text-gray-600 text-sm text-center py-6">No alerts in current log.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 border-b border-gray-800">
+                  <th className="text-left py-2 pr-4 font-medium">Time</th>
+                  <th className="text-left py-2 pr-4 font-medium">Src</th>
+                  <th className="text-left py-2 pr-4 font-medium">Dest</th>
+                  <th className="text-left py-2 pr-4 font-medium">Signature</th>
+                  <th className="text-left py-2 font-medium">Sev</th>
+                </tr>
+              </thead>
+              <tbody>
+                {suriData.alerts.slice(0, 15).map((a, i) => {
+                  const sev = SURI_SEVERITY[a.severity] || { label: `${a.severity}`, color: 'text-gray-400' };
+                  return (
+                    <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                      <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">
+                        {a.timestamp ? new Date(a.timestamp).toLocaleTimeString() : '—'}
+                      </td>
+                      <td className="py-2 pr-4 text-gray-300 font-mono">{a.src_ip ?? '—'}</td>
+                      <td className="py-2 pr-4 text-gray-300 font-mono">{a.dest_ip ?? '—'}</td>
+                      <td className="py-2 pr-4 text-gray-200 max-w-xs truncate">{a.signature ?? '—'}</td>
+                      <td className={`py-2 font-medium ${sev.color}`}>{sev.label}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── ZEEK NETWORK CONNECTIONS ──────────────────────────────── */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Wifi size={18} className="text-cyan-400" />
+            <h3 className="text-white font-semibold">Zeek Network Activity</h3>
+            <span className="text-xs text-gray-600 ml-1">live from conn.log</span>
+          </div>
+          {zeekData && (
+            <span className="text-xs text-gray-500">{zeekData.connections?.length ?? 0} recent</span>
+          )}
+        </div>
+
+        {netLoading ? (
+          <div className="h-24 bg-gray-800 rounded animate-pulse" />
+        ) : !zeekData?.available ? (
+          <div className="text-center py-8">
+            <Wifi size={28} className="text-gray-700 mx-auto mb-2" />
+            <p className="text-gray-600 text-sm">Zeek log not found.</p>
+            <p className="text-gray-700 text-xs mt-1">Zeek requires a Linux host with network_mode: host.</p>
+          </div>
+        ) : zeekData.connections.length === 0 ? (
+          <p className="text-gray-600 text-sm text-center py-6">No connections in current log.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 border-b border-gray-800">
+                  <th className="text-left py-2 pr-4 font-medium">Time</th>
+                  <th className="text-left py-2 pr-4 font-medium">Src</th>
+                  <th className="text-left py-2 pr-4 font-medium">Dest</th>
+                  <th className="text-left py-2 pr-4 font-medium">Proto</th>
+                  <th className="text-left py-2 pr-4 font-medium">Service</th>
+                  <th className="text-left py-2 pr-4 font-medium">Bytes ↓</th>
+                  <th className="text-left py-2 font-medium">Bytes ↑</th>
+                </tr>
+              </thead>
+              <tbody>
+                {zeekData.connections.slice(0, 15).map((c, i) => (
+                  <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                    <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">
+                      {c.ts ? new Date(parseFloat(c.ts) * 1000).toLocaleTimeString() : '—'}
+                    </td>
+                    <td className="py-2 pr-4 text-gray-300 font-mono">{c.src_ip}:{c.src_port}</td>
+                    <td className="py-2 pr-4 text-gray-300 font-mono">{c.dest_ip}:{c.dest_port}</td>
+                    <td className="py-2 pr-4 text-cyan-400 uppercase font-medium">{c.proto ?? '—'}</td>
+                    <td className="py-2 pr-4 text-gray-400">{c.service && c.service !== '-' ? c.service : '—'}</td>
+                    <td className="py-2 pr-4 text-gray-400">{fmtBytes(c.bytes_in)}</td>
+                    <td className="py-2 text-gray-400">{fmtBytes(c.bytes_out)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Bottom row */}

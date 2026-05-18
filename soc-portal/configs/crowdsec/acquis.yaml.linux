@@ -1,0 +1,16 @@
+# Linux production acquisition config.
+# Use this instead of acquis.yaml on Linux hosts where the nginx-logs
+# volume can be bind-mounted without seek errors (unlike Windows Docker Desktop).
+#
+# Steps to switch:
+#   1. In docker-compose.yml, restore the nginx-logs volume mount on crowdsec:
+#        - nginx-logs:/var/log/nginx:ro
+#   2. Replace this file as acquis.yaml:
+#        cp configs/crowdsec/acquis.yaml.linux configs/crowdsec/acquis.yaml
+#   3. Remove the Docker socket mount from the crowdsec service.
+---
+source: file
+filenames:
+  - /var/log/nginx/access.log
+labels:
+  type: nginx

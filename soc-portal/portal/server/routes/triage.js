@@ -2,7 +2,7 @@ const express    = require('express');
 const db         = require('../db/database');
 const wazuh      = require('../services/wazuh');
 const triageSvc  = require('../services/triage');
-const { auth }   = require('./auth');
+const { auth, adminOnly } = require('./auth');
 
 const router = express.Router();
 
@@ -104,14 +104,24 @@ router.patch('/:id', auth, (req, res) => {
     WHERE id = ?
   `).run(analyst_status, analyst_note || null, req.params.id);
 
+  db.get().prepare("INSERT INTO audit_log (user,action,detail) VALUES (?,?,?)").run(
+    req.user.username, 'TRIAGE_REVIEW', `id=${req.params.id} status=${analyst_status}`
+  );
+
   res.json(parseRow(
     db.get().prepare('SELECT * FROM triage_results WHERE id = ?').get(req.params.id)
   ));
 });
 
-// ── Delete a triage result ────────────────────────────────────
-router.delete('/:id', auth, (req, res) => {
+// ── Delete a triage result — admin only ───────────────────────
+router.delete('/:id', auth, adminOnly, (req, res) => {
+  const row = db.get().prepare('SELECT id FROM triage_results WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+
   db.get().prepare('DELETE FROM triage_results WHERE id = ?').run(req.params.id);
+  db.get().prepare("INSERT INTO audit_log (user,action,detail) VALUES (?,?,?)").run(
+    req.user.username, 'TRIAGE_DELETE', `id=${req.params.id}`
+  );
   res.json({ ok: true });
 });
 

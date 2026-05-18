@@ -12,8 +12,13 @@ export default function Login() {
   const [captchaId, setCaptchaId] = useState('');
   const [captchaQ,  setCaptchaQ]  = useState('');
   const [captchaA,  setCaptchaA]  = useState('');
-  const { login } = useAuth();
+  const { login, user, initialising } = useAuth();
   const navigate  = useNavigate();
+
+  // If session is already valid, skip the login page entirely
+  useEffect(() => {
+    if (!initialising && user) navigate('/dashboard', { replace: true });
+  }, [user, initialising]);
 
   async function handleSubmit(e) {
     e.preventDefault();

@@ -3,27 +3,37 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const VALID_VERDICTS = new Set(['true_positive', 'false_positive', 'needs_review']);
 
+// Sanitize any string value injected into the LLM prompt.
+// Strips newlines, prompt-injection keywords, and truncates to a safe length.
+function sanitize(val, maxLen = 200) {
+  if (val === null || val === undefined) return 'unknown';
+  return String(val)
+    .replace(/[\r\n\t]/g, ' ')
+    .replace(/\b(IGNORE|DISREGARD|FORGET|SYSTEM|OVERRIDE|INSTRUCTIONS?)\b/gi, '[filtered]')
+    .slice(0, maxLen);
+}
+
 function buildPrompt(alert, correlated) {
   const rule  = alert.rule  || {};
   const agent = alert.agent || {};
 
-  const groups = [].concat(rule.groups || []).join(', ') || 'none';
+  const groups = [].concat(rule.groups || []).map(g => sanitize(g, 60)).join(', ') || 'none';
   const mitre  = rule.mitre?.technique
-    ? [].concat(rule.mitre.technique).join(', ')
+    ? [].concat(rule.mitre.technique).map(t => sanitize(t, 60)).join(', ')
     : 'not mapped';
 
   const correlatedBlock = correlated.length === 0
     ? '  (none)'
     : correlated.slice(0, 10).map(e =>
-        `  [${(e.timestamp || '').slice(11, 19)}] L${e?.rule?.level ?? '?'} — ${e?.rule?.description || 'unknown'}`
+        `  [${sanitize((e.timestamp || '').slice(11, 19), 8)}] L${e?.rule?.level ?? '?'} — ${sanitize(e?.rule?.description, 100)}`
       ).join('\n');
 
   return `You are a SOC triage analyst. Analyze the security alert below and respond with ONLY a JSON object — no markdown, no prose outside the JSON.
 
 ALERT:
-  Rule        : ${rule.description || 'Unknown'} (Severity Level ${rule.level ?? '?'}/15)
-  Agent       : ${agent.name || 'unknown'} (${agent.ip || 'unknown IP'})
-  Timestamp   : ${alert.timestamp || 'unknown'}
+  Rule        : ${sanitize(rule.description)} (Severity Level ${rule.level ?? '?'}/15)
+  Agent       : ${sanitize(agent.name, 60)} (${sanitize(agent.ip, 40)})
+  Timestamp   : ${sanitize(alert.timestamp, 30)}
   Groups      : ${groups}
   MITRE       : ${mitre}
 

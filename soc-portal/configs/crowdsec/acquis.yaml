@@ -1,0 +1,8 @@
+---
+# Read nginx logs directly from the Docker container stdout/stderr.
+# This avoids Docker volume symlink seek errors on Windows hosts.
+source: docker
+container_name:
+  - soc-nginx
+labels:
+  type: nginx
