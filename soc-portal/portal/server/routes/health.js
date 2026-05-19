@@ -2,13 +2,27 @@ const express = require('express');
 const { auth } = require('./auth');
 const snmp = require('../services/snmp');
 const deviceHealth = require('../services/device-health');
+const monitor = require('../services/containerMonitor');
 
 const router = express.Router();
 
 // Base health
 router.get('/', (_, res) => res.json({ ok: true, ts: new Date() }));
 
-// Endpoint health via SNMP (Prometheus)
+// Live container status (polled every 30s in background)
+router.get('/containers', auth, (req, res) => {
+  const status = monitor.getStatus();
+  const list = Object.values(status);
+  const summary = {
+    total:      list.length,
+    running:    list.filter(c => c.state === 'running').length,
+    stopped:    list.filter(c => c.state === 'stopped').length,
+    restarting: list.filter(c => c.state === 'restarting').length,
+  };
+  res.json({ summary, containers: list });
+});
+
+// Endpoint health via SNMP
 router.get('/endpoints', auth, async (req, res) => {
   try {
     const data = await snmp.getEndpointHealth();

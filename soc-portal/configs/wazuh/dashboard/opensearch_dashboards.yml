@@ -1,25 +1,15 @@
-# ═══════════════════════════════════════════════════════════════
-#  Wazuh Dashboard (OpenSearch Dashboards) Configuration
-# ═══════════════════════════════════════════════════════════════
-
 server.host: 0.0.0.0
 server.port: 5601
-server.ssl.enabled: false
-
-opensearch.hosts: https://wazuh-indexer:9200
-opensearch.ssl.verificationMode: none
-opensearch.username: kibanaserver
-opensearch.password: SecurePassword1!
-opensearch.requestHeadersAllowlist: ["securitytenant","Authorization"]
-
-opensearch_security.multitenancy.enabled: true
-opensearch_security.multitenancy.tenants.enable_global: true
-opensearch_security.multitenancy.tenants.enable_private: false
-opensearch_security.multitenancy.tenants.preferred: ["Global","Default"]
-opensearch_security.readonly_mode.roles: ["kibana_read_only"]
-opensearch_security.cookie.secure: false
-
-uiSettings.overrides.defaultRoute: /app/wazuh
-
 server.basePath: /wazuh
 server.rewriteBasePath: true
+opensearch.hosts: https://wazuh-indexer:9200
+opensearch.ssl.verificationMode: certificate
+opensearch.requestHeadersWhitelist: ["securitytenant","Authorization"]
+opensearch_security.auth.type: basicauth
+opensearch_security.multitenancy.enabled: false
+opensearch_security.readonly_mode.roles: ["kibana_read_only"]
+server.ssl.enabled: true
+server.ssl.key: "/usr/share/wazuh-dashboard/certs/wazuh.dashboard-key.pem"
+server.ssl.certificate: "/usr/share/wazuh-dashboard/certs/wazuh.dashboard.pem"
+opensearch.ssl.certificateAuthorities: ["/usr/share/wazuh-dashboard/certs/root-ca.pem"]
+uiSettings.overrides.defaultRoute: /app/wz-home

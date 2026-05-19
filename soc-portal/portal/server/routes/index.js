@@ -12,7 +12,7 @@ const triageRoutes  = require('./triage');
 const chatRoutes    = require('./chat');
 const toolsRoutes   = require('./tools');
 const netdataRoutes  = require('./netdata');
-const crowdsecRoutes  = require('./crowdsec');
+const huntingRoutes  = require('./hunting');
 const settingsRoutes  = require('./settings');
 
 const router = express.Router();
@@ -30,7 +30,7 @@ router.use('/triage',   triageRoutes);
 router.use('/chat',     chatRoutes);
 router.use('/tools',    toolsRoutes);
 router.use('/netdata',   netdataRoutes);
-router.use('/crowdsec', crowdsecRoutes);
+router.use('/hunting',  huntingRoutes);
 router.use('/settings', settingsRoutes);
 
 module.exports = router;

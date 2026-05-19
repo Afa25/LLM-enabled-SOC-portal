@@ -12,11 +12,13 @@ networks:
         - subnet: 172.20.0.0/24
 
 volumes:
+  wazuh-certs:
   wazuh-indexer-data:
   wazuh-manager-data:
   wazuh-logs:
   grafana-data:
   prometheus-data:
+  prometheus-targets:
   ollama-models:
   portal-db:
   portal-backups:
@@ -30,43 +32,72 @@ volumes:
   opencti-rabbitmq-data:
   opencti-minio-data:
   velociraptor-data:
+  yara-rules-data:
+  sigma-rules-data:
 
 services:
+
+  # ────────────────────────────────────────────────────────────────
+  # WAZUH CERT GENERATOR — runs once, generates all Wazuh certs
+  # ────────────────────────────────────────────────────────────────
+  wazuh-certgen:
+    image: wazuh/wazuh-certs-generator:0.0.2
+    container_name: soc-wazuh-certgen
+    hostname: wazuh-certs-generator
+    command: generate-indexer-certs
+    restart: "no"
+    volumes:
+      - ./configs/wazuh/certs.yml:/config/certs.yml
+      - wazuh-certs:/certificates/
+
+  # ────────────────────────────────────────────────────────────────
+  # WAZUH CERTS PERMISSION FIX — makes cert dir traversable after certgen
+  # ────────────────────────────────────────────────────────────────
+  wazuh-certs-fix:
+    image: alpine
+    container_name: soc-wazuh-certs-fix
+    restart: "no"
+    depends_on:
+      - wazuh-certgen
+    volumes:
+      - wazuh-certs:/certificates
+    command: sh -c "chmod 755 /certificates && echo 'Cert directory permissions fixed.'"
 
   # ────────────────────────────────────────────────────────────────
   # WAZUH INDEXER (OpenSearch)
   # ────────────────────────────────────────────────────────────────
   wazuh-indexer:
-    image: wazuh/wazuh-indexer:4.7.3
+    image: wazuh/wazuh-indexer:4.12.0
     container_name: soc-wazuh-indexer
     restart: unless-stopped
     hostname: wazuh-indexer
     environment:
-      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx1g -XX:MaxDirectMemorySize=512m"
       - bootstrap.memory_lock=true
-      - network.host=0.0.0.0
     ulimits:
       memlock: { soft: -1, hard: -1 }
       nofile:  { soft: 65536, hard: 65536 }
     volumes:
       - wazuh-indexer-data:/var/lib/wazuh-indexer
       - ./configs/wazuh/indexer/opensearch.yml:/usr/share/wazuh-indexer/opensearch.yml:ro
-      - ./configs/wazuh/certs:/usr/share/wazuh-indexer/config/certs:ro
+      - wazuh-certs:/usr/share/wazuh-indexer/certs:ro
     networks:
       soc-net:
         ipv4_address: 172.20.0.10
+    depends_on:
+      - wazuh-certs-fix
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/localhost/9200' 2>/dev/null && echo ok || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 30s
+      start_period: 60s
 
   # ────────────────────────────────────────────────────────────────
   # WAZUH MANAGER
   # ────────────────────────────────────────────────────────────────
   wazuh-manager:
-    image: wazuh/wazuh-manager:4.7.3
+    image: wazuh/wazuh-manager:4.12.0
     container_name: soc-wazuh-manager
     restart: unless-stopped
     hostname: wazuh-manager
@@ -74,10 +105,10 @@ services:
       - INDEXER_URL=https://wazuh-indexer:9200
       - INDEXER_USERNAME=admin
       - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD}
-      - FILEBEAT_SSL_VERIFICATION_MODE=none
-      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
-      - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
-      - SSL_KEY=/etc/ssl/filebeat-key.pem
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/wazuh/root-ca.pem
+      - SSL_CERTIFICATE=/etc/ssl/wazuh/wazuh.manager.pem
+      - SSL_KEY=/etc/ssl/wazuh/wazuh.manager-key.pem
       - API_USERNAME=wazuh-wui
       - API_PASSWORD=${WAZUH_API_PASSWORD}
     volumes:
@@ -85,7 +116,9 @@ services:
       - wazuh-logs:/var/ossec/logs
       - ./configs/wazuh/manager/ossec.conf:/var/ossec/etc/ossec.conf:ro
       - ./configs/wazuh/manager/local_rules.xml:/var/ossec/etc/rules/local_rules.xml:ro
-      - ./configs/wazuh/certs:/etc/ssl:ro
+      - ./configs/wazuh/manager/filebeat.yml:/etc/filebeat/filebeat.yml
+      - ./configs/wazuh/manager/s6/filebeat-run:/etc/services.d/filebeat/run
+      - wazuh-certs:/etc/ssl/wazuh:ro
     ports:
       - "1514:1514/udp"
       - "1514:1514/tcp"
@@ -103,7 +136,7 @@ services:
   # WAZUH DASHBOARD
   # ────────────────────────────────────────────────────────────────
   wazuh-dashboard:
-    image: wazuh/wazuh-dashboard:4.7.3
+    image: wazuh/wazuh-dashboard:4.12.0
     container_name: soc-wazuh-dashboard
     restart: unless-stopped
     hostname: wazuh-dashboard
@@ -117,7 +150,7 @@ services:
       - API_PASSWORD=${WAZUH_API_PASSWORD}
     volumes:
       - ./configs/wazuh/dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml:ro
-      - ./configs/wazuh/certs:/usr/share/wazuh-dashboard/certs:ro
+      - wazuh-certs:/usr/share/wazuh-dashboard/certs:ro
       - wazuh-dashboard-config:/usr/share/wazuh-dashboard/data/wazuh/config
     networks:
       soc-net:
@@ -140,13 +173,18 @@ services:
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_ANALYTICS_REPORTING_ENABLED=false
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
-      # SSO — anonymous access gated by Nginx auth_request.
-      # Viewer role: portal users can read dashboards but cannot modify them.
-      # Direct Grafana login (admin credentials from .env) grants full access.
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      # SSO — auth proxy: nginx passes X-WEBAUTH-USER from the portal session.
+      # Portal-authenticated users are logged into Grafana as Admin automatically.
+      # Direct Grafana login (admin credentials from .env) still works.
+      - GF_AUTH_PROXY_ENABLED=true
+      - GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER
+      - GF_AUTH_PROXY_HEADER_PROPERTY=username
+      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
+      - GF_AUTH_PROXY_HEADERS=Role:X-WEBAUTH-ROLE
+      - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_NEWS_NEWS_FEED_ENABLED=false
+      - WAZUH_INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -160,7 +198,7 @@ services:
       retries: 3
 
   # ────────────────────────────────────────────────────────────────
-  # PROMETHEUS
+  # PROMETHEUS — metrics collection, proxied at /prometheus/ via nginx
   # ────────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.51.2
@@ -172,17 +210,17 @@ services:
       - '--storage.tsdb.retention.time=30d'
       - '--web.enable-lifecycle'
       - '--web.external-url=/prometheus/'
-      - '--web.route-prefix=/prometheus/'
+      - '--web.route-prefix=/'
     volumes:
       - prometheus-data:/prometheus
       - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-targets:/etc/prometheus/targets
     networks:
       soc-net:
         ipv4_address: 172.20.0.14
 
   # ────────────────────────────────────────────────────────────────
-  # NODE EXPORTER
-  # NOTE: pid:host removed — not supported on Windows Docker Desktop
+  # NODE EXPORTER — host system metrics for Prometheus
   # ────────────────────────────────────────────────────────────────
   node-exporter:
     image: prom/node-exporter:v1.7.0
@@ -308,7 +346,13 @@ services:
       - portal-db:/app/data
       - suricata-logs:/data/suricata:ro
       - zeek-logs:/data/zeek:ro
-      - ./configs/wazuh/certs/root-ca.pem:/app/certs/root-ca.pem:ro
+      - wazuh-certs:/app/certs:ro
+      - yara-rules-data:/opt/yara-rules
+      - sigma-rules-data:/opt/sigma-rules
+      - prometheus-targets:/etc/prometheus/targets
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    group_add:
+      - "0"
     networks:
       soc-net:
         ipv4_address: 172.20.0.21
@@ -378,6 +422,32 @@ services:
       done"
     depends_on:
       - soc-portal
+
+  # ────────────────────────────────────────────────────────────────
+  # DETECTION RULES INIT — clones YARA and Sigma rule repos once
+  # Re-run manually: docker compose run --rm init-rules
+  # Update after clone: POST /api/hunting/update
+  # ────────────────────────────────────────────────────────────────
+  init-rules:
+    image: alpine:latest
+    container_name: soc-init-rules
+    restart: "no"
+    volumes:
+      - yara-rules-data:/opt/yara-rules
+      - sigma-rules-data:/opt/sigma-rules
+    command: >
+      sh -c "
+        apk add --no-cache git > /dev/null 2>&1;
+        if [ ! -d /opt/yara-rules/.git ]; then
+          echo 'Cloning YARA rules...';
+          git clone --depth=1 https://github.com/Yara-Rules/rules.git /opt/yara-rules;
+        else echo 'YARA rules already cloned.'; fi;
+        if [ ! -d /opt/sigma-rules/.git ]; then
+          echo 'Cloning Sigma rules...';
+          git clone --depth=1 https://github.com/SigmaHQ/sigma.git /opt/sigma-rules;
+        else echo 'Sigma rules already cloned.'; fi;
+        echo 'Done.'
+      "
 
   # ────────────────────────────────────────────────────────────────
   # OPENCTI DEPENDENCIES
@@ -475,24 +545,18 @@ services:
 
   # ────────────────────────────────────────────────────────────────
   # VELOCIRAPTOR (endpoint visibility & DFIR)
-  # GUI: https://<server-ip>:8889  (direct, own TLS)
+  # GUI: https://<server-ip>:8889  (direct, own TLS — not proxied)
   # Agent enrollment port: 8001
   # ────────────────────────────────────────────────────────────────
   velociraptor:
-    image: velocidex/velociraptor:v0.7.0-4
+    build:
+      context: ./velociraptor
+      dockerfile: Dockerfile
     container_name: soc-velociraptor
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        if [ ! -f /velociraptor/server.config.yaml ]; then
-          velociraptor config generate > /velociraptor/server.config.yaml
-          velociraptor --config /velociraptor/server.config.yaml \
-            user add admin ${VELOCIRAPTOR_ADMIN_PASSWORD:-ChangeThisVelo1!} --role administrator
-        fi
-        exec velociraptor --config /velociraptor/server.config.yaml frontend -v
     environment:
-      - VELOCIRAPTOR_ADMIN_PASSWORD=${VELOCIRAPTOR_ADMIN_PASSWORD:-ChangeThisVelo1!}
+      - VEL_USER=admin
+      - VEL_PASSWORD=${VELOCIRAPTOR_ADMIN_PASSWORD:-ChangeThisVelo1!}
     volumes:
       - velociraptor-data:/velociraptor
     ports:

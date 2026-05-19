@@ -9,11 +9,10 @@ import Scheduler   from './pages/Scheduler';
 import Triage      from './pages/Triage';
 import Chat        from './pages/Chat';
 import Tools       from './pages/Tools';
-import CrowdSec    from './pages/CrowdSec';
 import Login       from './pages/Login';
 import {
   LayoutDashboard, ShieldAlert, Monitor, Smartphone,
-  FileText, Clock, LogOut, Shield, Menu, ScanSearch, MessageSquare, Boxes, ShieldBan,
+  FileText, Clock, LogOut, Shield, Menu, ScanSearch, MessageSquare, Boxes,
   Network, Copy, Check, X, Globe
 } from 'lucide-react';
 
@@ -203,7 +202,6 @@ const NAV = [
   { to: '/triage',    icon: ScanSearch,      label: 'AI Triage'  },
   { to: '/chat',      icon: MessageSquare,   label: 'AI Chat'    },
   { to: '/tools',     icon: Boxes,           label: 'Tools'      },
-  { to: '/crowdsec',  icon: ShieldBan,       label: 'CrowdSec'   },
   { to: '/agents',    icon: Monitor,         label: 'Agents'     },
   { to: '/devices',   icon: Smartphone,      label: 'Devices'    },
   { to: '/reports',   icon: FileText,        label: 'Reports'    },
@@ -263,9 +261,13 @@ function Sidebar({ open, setOpen, onNetworkClick }) {
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
             Prometheus
           </a>
-          <a href="http://localhost:9392" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-500 hover:text-green-400 rounded hover:bg-gray-800 transition-colors">
-            <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" />
-            OpenVAS
+          <a href="/opencti/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-500 hover:text-rose-400 rounded hover:bg-gray-800 transition-colors">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
+            OpenCTI
+          </a>
+          <a href={`https://${window.location.hostname}:8889`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-500 hover:text-green-400 rounded hover:bg-gray-800 transition-colors">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
+            Velociraptor
           </a>
           <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 rounded cursor-default">
             <span className="w-1.5 h-1.5 rounded-full bg-gray-700 flex-shrink-0" />
@@ -350,7 +352,6 @@ function Layout() {
               <Route path="/alerts"    element={<Alerts    />} />
               <Route path="/triage"    element={<Triage    />} />
               <Route path="/tools"     element={<Tools     />} />
-              <Route path="/crowdsec"  element={<CrowdSec  />} />
               <Route path="/agents"    element={<Agents    />} />
               <Route path="/devices"   element={<Devices   />} />
               <Route path="/reports"   element={<Reports   />} />

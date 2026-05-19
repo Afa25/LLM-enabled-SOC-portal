@@ -3,6 +3,7 @@ apiVersion: 1
 datasources:
   - name: Wazuh-OpenSearch
     type: grafana-opensearch-datasource
+    uid: wazuh-opensearch
     access: proxy
     url: https://wazuh-indexer:9200
     basicAuth: true
@@ -10,16 +11,19 @@ datasources:
     secureJsonData:
       basicAuthPassword: ${WAZUH_INDEXER_PASSWORD}
     jsonData:
-      database: wazuh-alerts-*
-      timeField: timestamp
-      esVersion: "7.10.0"
+      database: wazuh-alerts-4.x-*
+      timeField: "@timestamp"
+      flavor: opensearch
+      version: "2.0.0"
       tlsSkipVerify: true
       logMessageField: rule.description
       logLevelField: rule.level
+      maxConcurrentShardRequests: 5
     isDefault: true
 
   - name: Prometheus
     type: prometheus
+    uid: prometheus-main
     access: proxy
     url: http://prometheus:9090
     isDefault: false

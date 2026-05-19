@@ -1,6 +1,10 @@
 const express = require('express');
+const https   = require('https');
 const fetch   = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 const { auth } = require('./auth');
+
+// Health probes only — skip cert validation for self-signed internal services
+const insecureAgent = new https.Agent({ rejectUnauthorized: false });
 
 const router = express.Router();
 
@@ -13,8 +17,8 @@ const TOOLS = [
     name: 'Wazuh Dashboard',
     category: 'SIEM',
     description: 'Security alerts, agent management, rule editor, and compliance dashboards.',
-    internalUrl: 'http://wazuh-dashboard:5601',
-    path: '/wazuh/',
+    internalUrl: 'https://wazuh-dashboard:5601',
+    path: '/',
     externalPath: '/wazuh/',
     loginHint: 'Use your Wazuh admin credentials from .env',
     color: 'blue',
@@ -33,30 +37,42 @@ const TOOLS = [
     hasUI: true,
   },
   {
-    id: 'prometheus',
-    name: 'Prometheus',
-    category: 'Metrics',
-    description: 'Time-series metrics collection. Scrapes node-exporter and portal metrics.',
-    internalUrl: 'http://prometheus:9090',
-    path: '/prometheus/-/healthy',
-    externalPath: '/prometheus/',
-    loginHint: null,
+    id: 'opencti',
+    name: 'OpenCTI',
+    category: 'Threat Intel',
+    description: 'Threat intelligence platform. Manage IOCs, TTPs, and threat actor profiles.',
+    internalUrl: 'http://opencti:8080',
+    path: '/opencti/graphql',
+    externalPath: '/opencti/',
+    loginHint: 'Use your OpenCTI admin credentials from .env',
     color: 'red',
     hasUI: true,
   },
   {
-    id: 'openvas',
-    name: 'OpenVAS',
-    category: 'Vulnerability',
-    description: 'Greenbone vulnerability scanner. Run network-wide vulnerability assessments.',
-    internalUrl: 'http://openvas:9392',
-    path: '/',
-    externalPath: 'http://localhost:9392',
-    loginHint: 'Use your OpenVAS admin credentials from .env',
+    id: 'velociraptor',
+    name: 'Velociraptor',
+    category: 'DFIR',
+    description: 'Endpoint visibility and digital forensics. Run hunts and collect artifacts.',
+    internalUrl: 'https://velociraptor:8889',
+    path: '/app/index.html',
+    externalPath: null,
+    directPort: 8889,
+    loginHint: 'Use Velociraptor admin credentials from .env',
     color: 'green',
     hasUI: true,
-    startCmd: 'docker compose --env-file .env up -d openvas',
-    note: 'First start takes 10–20 min for NVT feed sync. Opens on direct port — no sub-path proxy.',
+    note: 'Served on its own HTTPS port — opens in a new tab at https://<server>:8889',
+  },
+  {
+    id: 'prometheus',
+    name: 'Prometheus',
+    category: 'Metrics',
+    description: 'Agent and host metrics collection. Scrapes enrolled agent exporters and host metrics.',
+    internalUrl: 'http://prometheus:9090',
+    path: '/-/healthy',
+    externalPath: '/prometheus/',
+    color: 'red',
+    hasUI: true,
+    note: 'Access via /prometheus/ — also visible as a Grafana datasource.',
   },
   {
     id: 'ollama',
@@ -82,7 +98,7 @@ const TOOLS = [
     credentials: null,
     color: 'cyan',
     hasUI: false,
-    note: 'Not supported on Windows Docker Desktop — network_mode: host is unavailable. Requires a Linux host with native Docker to capture host network traffic.',
+    note: 'Requires Linux host with native Docker (network_mode: host). Not available on Windows Docker Desktop.',
   },
   {
     id: 'suricata',
@@ -95,7 +111,7 @@ const TOOLS = [
     credentials: null,
     color: 'yellow',
     hasUI: false,
-    note: 'Not supported on Windows Docker Desktop — network_mode: host is unavailable. Requires a Linux host with native Docker to capture host network traffic.',
+    note: 'Requires Linux host with native Docker (network_mode: host). Not available on Windows Docker Desktop.',
   },
 ];
 
@@ -106,17 +122,21 @@ router.get('/', auth, async (req, res) => {
       const base = { ...tool };
       delete base.internalUrl;
       delete base.path;
-      delete base.credentials; // never expose credentials to the client
+      delete base.credentials;
 
       if (!tool.internalUrl) {
         return { ...base, status: 'no-ui' };
       }
 
       try {
-        const r = await fetch(`${tool.internalUrl}${tool.path}`, {
+        const fetchOpts = {
           signal: AbortSignal.timeout(3000),
           redirect: 'follow',
-        });
+        };
+        if (tool.internalUrl.startsWith('https://')) {
+          fetchOpts.agent = insecureAgent;
+        }
+        const r = await fetch(`${tool.internalUrl}${tool.path}`, fetchOpts);
         const up = r.status < 500;
         return { ...base, status: up ? 'up' : 'degraded' };
       } catch {

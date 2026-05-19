@@ -35,7 +35,30 @@
       "Bash(ipconfig)",
       "Bash(wait)",
       "Bash(docker info *)",
-      "Bash(docker context *)"
+      "Bash(docker context *)",
+      "Bash(gh api *)",
+      "Read(//c/Users/Hp/Desktop/**)",
+      "Read(//c/Users/Hp/**)",
+      "Bash(curl -s \"https://api.github.com/repos/Velocidex/velociraptor/releases/latest\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d['tag_name']\\); [print\\(a['browser_download_url']\\) for a in d['assets'] if 'linux-amd64' in a['name'] and not a['name'].endswith\\('.sig'\\) and not 'musl' in a['name']]\")",
+      "Bash(docker rmi *)",
+      "Bash(docker volume *)",
+      "PowerShell($containers = docker ps -a --filter \"volume=soc-portal_wazuh-certs\" --format \"{{.Names}}\" 2>&1; Write-Output \"Containers using wazuh-certs: $containers\")",
+      "Bash(findstr \"pemkey\")",
+      "Bash(findstr \":80 \\\\|:443 \")",
+      "Bash(curl -sk https://localhost:8889/)",
+      "Bash(curl -sk -c /tmp/cookies.txt -X POST https://localhost/api/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"username\\\\\":\\\\\"$\\(grep \"^PORTAL_USER\" c:\\\\Users\\\\Hp\\\\Desktop\\\\LLM-enabled-SOC-portal\\\\soc-portal\\\\.env)",
+      "PowerShell($env = Get-Content \"c:\\\\Users\\\\Hp\\\\Desktop\\\\LLM-enabled-SOC-portal\\\\soc-portal\\\\.env\" | Where-Object { $_ -match \"^PORTAL_\" }; $env)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('exists:','backend_roles' in d\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('users:', list\\(d.keys\\(\\)\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('kibanaserver',{}\\), indent=2\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Cluster:', d.get\\('status'\\), 'Nodes:', d.get\\('number_of_nodes'\\)\\)\")",
+      "Bash(curl -sk -o /dev/null -w \"Nginx HTTPS status: %{http_code}\\\\n\" https://localhost/)",
+      "Bash(curl -sk -o /dev/null -w \"%{http_code} %{redirect_url}\\\\n\" https://localhost/grafana/)",
+      "Bash(curl -sk -o /dev/null -w \"%{http_code}\\\\n\" https://localhost/wazuh/)",
+      "Bash(python3 -c \"import base64; print\\(base64.b64encode\\(b'admin:ChangeThisIndexerPassword1!'\\).decode\\(\\)\\)\")",
+      "Bash(findstr /i \"IPv4\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(p['attributes']['title']\\) for p in d.get\\('saved_objects',[]\\)]\")"
     ]
   }
 }

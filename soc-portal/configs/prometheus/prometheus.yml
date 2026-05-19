@@ -21,6 +21,16 @@ scrape_configs:
       - targets: ['grafana:3000']
     metrics_path: /metrics
 
-  - job_name: 'my-agent'
-    static_configs:
-      - targets: ['192.168.10.107:9182']
+  # ── Dynamic agent targets ─────────────────────────────────────
+  # The portal writes /etc/prometheus/targets/agents.json when agents
+  # enroll. Each entry = { "targets": ["<ip>:<port>"], "labels": {...} }
+  # Linux agents: install node-exporter (port 9100)
+  # Windows agents: install windows-exporter (port 9182)
+  - job_name: 'agents'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets/agents.json'
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance

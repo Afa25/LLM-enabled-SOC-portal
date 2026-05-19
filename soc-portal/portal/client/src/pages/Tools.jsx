@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../App';
 import {
-  Shield, BarChart2, Activity, Bug, Brain, Fish, Zap,
-  ExternalLink, RefreshCw, Terminal, Copy, Check,
+  Shield, BarChart2, Activity, Brain, Fish, Zap,
+  Globe, Search, ExternalLink, RefreshCw, Terminal, Copy, Check,
   AlertCircle, CheckCircle2, XCircle, Minus, Key, Info
 } from 'lucide-react';
 
@@ -11,13 +11,14 @@ const TOOL_META = {
   'wazuh-dashboard': { icon: Shield,   accent: '#3b82f6' },  // blue
   grafana:           { icon: BarChart2, accent: '#f97316' }, // orange
   prometheus:        { icon: Activity,  accent: '#ef4444' }, // red
-  openvas:           { icon: Bug,       accent: '#22c55e' }, // green
+  opencti:           { icon: Globe,     accent: '#e11d48' }, // rose
+  velociraptor:      { icon: Search,    accent: '#22c55e' }, // green
   ollama:            { icon: Brain,     accent: '#a855f7' }, // purple
   zeek:              { icon: Fish,      accent: '#06b6d4' }, // cyan
   suricata:          { icon: Zap,       accent: '#eab308' }, // yellow
 };
 
-const CATEGORY_ORDER = ['SIEM', 'Metrics', 'AI', 'Vulnerability', 'Network'];
+const CATEGORY_ORDER = ['SIEM', 'Metrics', 'Threat Intel', 'DFIR', 'AI', 'Network'];
 
 // ── Status pill ───────────────────────────────────────────────
 function StatusPill({ status }) {
@@ -56,7 +57,11 @@ function CopyBtn({ text }) {
 function ToolCard({ tool, onOpenEmbed }) {
   const meta   = TOOL_META[tool.id] || { icon: Shield, accent: '#6b7280' };
   const Icon   = meta.icon;
-  const canLaunch = tool.hasUI && tool.externalPath;
+  const directUrl = tool.directPort
+    ? `https://${window.location.hostname}:${tool.directPort}`
+    : null;
+  const launchUrl = tool.externalPath || directUrl;
+  const canLaunch = tool.hasUI && launchUrl;
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden hover:border-gray-700 transition-colors flex flex-col">
@@ -124,7 +129,7 @@ function ToolCard({ tool, onOpenEmbed }) {
           {canLaunch ? (
             <>
               <a
-                href={tool.externalPath}
+                href={launchUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
@@ -136,7 +141,7 @@ function ToolCard({ tool, onOpenEmbed }) {
               >
                 <ExternalLink size={13} /> Open in new tab
               </a>
-              {tool.status !== 'down' && (
+              {tool.status !== 'down' && tool.externalPath && (
                 <button
                   onClick={() => onOpenEmbed(tool)}
                   className="px-3 py-2.5 rounded-xl text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors"

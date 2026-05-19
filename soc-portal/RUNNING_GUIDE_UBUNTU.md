@@ -5,6 +5,8 @@ Covers installation, full startup, first-run initialization, feature testing, an
 
 > **Bridged networking:** The VM gets its own IP on your LAN (e.g. `192.168.1.105`). Use that IP — not `localhost` — to access the portal from the host machine or any other device on the network.
 
+> **Service configuration:** For detailed tuning of Prometheus, Zeek, Suricata, Wazuh, Grafana, Ollama, OpenCTI, Velociraptor, and Nginx, see [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md).
+
 ---
 
 ## Table of Contents
@@ -20,7 +22,7 @@ Covers installation, full startup, first-run initialization, feature testing, an
 9. [Access the Web Interfaces](#9-access-the-web-interfaces)
 10. [Feature Testing Walkthrough](#10-feature-testing-walkthrough)
 11. [Enrol Wazuh Agents](#11-enrol-wazuh-agents)
-12. [Start Optional Services (Zeek / Suricata / OpenVAS)](#12-start-optional-services-zeek--suricata--openvas)
+12. [Start Optional Services (Zeek / Suricata / OpenCTI / Velociraptor)](#12-start-optional-services)
 13. [Stop / Restart / Update](#13-stop--restart--update)
 14. [Troubleshooting Reference](#14-troubleshooting-reference)
 
@@ -33,11 +35,11 @@ Covers installation, full startup, first-run initialization, feature testing, an
 | Ubuntu | 22.04 or 24.04 LTS | `lsb_release -a` |
 | CPU | 4 cores | `nproc` |
 | RAM | 16 GB | `free -h` |
-| Free disk | 20 GB | `df -h /` |
+| Free disk | 30 GB | `df -h /` |
 | Docker Engine | ≥ 24 | `docker --version` |
 | Docker Compose | ≥ 2.20 | `docker compose version` |
 
-> **Note:** On Ubuntu, Zeek, Suricata, and OpenVAS can use `network_mode: host` — this is a key advantage over Windows.
+> **Note:** On Ubuntu, Zeek and Suricata use `network_mode: host` and can monitor real network traffic — a key advantage over Windows.
 
 ---
 
@@ -79,9 +81,9 @@ docker --version
 docker compose version
 ```
 
-### Required kernel parameter for Wazuh/OpenSearch
+### Required kernel parameters
 
-OpenSearch requires a higher `vm.max_map_count`. Set it permanently:
+OpenSearch (Wazuh indexer) and OpenCTI's Elasticsearch both require a higher `vm.max_map_count`:
 
 ```bash
 echo 'vm.max_map_count=262144' | sudo tee -a /etc/sysctl.conf
@@ -103,7 +105,7 @@ ip addr show | grep 'inet ' | grep -v '127.0.0.1'
 ```
 
 Note the IP (`192.168.1.105` in the example) and the interface name (`ens33`).  
-You will use these in the next section. This IP is also how the host machine and other LAN devices reach the portal.
+You will use both in the next section. This IP is also how the host machine and other LAN devices reach the portal.
 
 ---
 
@@ -134,30 +136,55 @@ cp .env.example .env
 nano .env
 ```
 
-**Set these two values using the IP and interface from Section 3:**
+**Set these two values first using the IP and interface from Section 3:**
 
 ```bash
-# Replace 192.168.1.105 and ens33 with your actual values from Section 3
+SERVER_IP=192.168.1.105       # replace with your VM's bridged IP
+SOC_NETWORK_INTERFACE=ens33   # replace with your interface name
+```
+
+**Full list of key variables:**
+
+```
+# Portal
+PORTAL_USER=admin
+PORTAL_PASS=ChangeThisPortalPassword1!
+JWT_SECRET=<run: openssl rand -hex 32>
+
+# Wazuh
+WAZUH_API_PASSWORD=ChangeThisWazuhPassword1!
+WAZUH_INDEXER_PASSWORD=ChangeThisIndexerPassword1!
+WAZUH_DASHBOARD_PASSWORD=ChangeThisDashboardPassword1!
+
+# Grafana
+GRAFANA_PASSWORD=ChangeThisGrafanaPassword1!
+
+# OpenCTI
+OPENCTI_ADMIN_EMAIL=admin@soc.local
+OPENCTI_ADMIN_PASSWORD=ChangeThisOpenCTI1!
+OPENCTI_ADMIN_TOKEN=<run: python3 -c "import uuid; print(uuid.uuid4())">
+OPENCTI_RABBITMQ_PASS=ChangeThisRabbitMQ1!
+OPENCTI_MINIO_PASS=ChangeThisMinio1!
+
+# Velociraptor
+VELOCIRAPTOR_ADMIN_PASSWORD=ChangeThisVelo1!
+
+# LLM — pinned model, <6 GB on disk
+OLLAMA_MODEL=qwen2.5:7b-instruct-q4_K_M
+
+# Network
 SERVER_IP=192.168.1.105
 SOC_NETWORK_INTERFACE=ens33
 ```
 
-Full list of key variables:
+> **`SERVER_IP`** — the VM's bridged LAN IP. Pre-fills enrollment commands in **Agents → Add Agent** automatically.
 
-```
-WAZUH_API_PASSWORD=SecurePassword1!
-GRAFANA_PASSWORD=SocGrafana1!
-JWT_SECRET=<random long string>
-OLLAMA_HOST=http://ollama:11434
-SERVER_IP=192.168.1.105       # VM's bridged IP — from Section 3
-SOC_NETWORK_INTERFACE=ens33   # VM's network interface — from Section 3
-```
+> **`OLLAMA_MODEL`** — pinned to `qwen2.5:7b-instruct-q4_K_M` (~4.4 GB disk, ~5 GB RAM). Do not change to a larger model on 16 GB RAM.
 
-> **`SERVER_IP`** — the VM's bridged LAN IP. This is the address other machines use to reach the portal, and it pre-fills enrollment commands in **Agents → Add Agent** automatically.
-
-> **`SOC_NETWORK_INTERFACE`** — the interface Zeek and Suricata will monitor inside Docker.
-
-> Leave `OLLAMA_HOST` as `http://ollama:11434` — this is the Docker internal hostname.
+> **`OPENCTI_ADMIN_TOKEN`** must be a valid UUID. Generate one:
+> ```bash
+> python3 -c "import uuid; print(uuid.uuid4())"
+> ```
 
 ---
 
@@ -172,32 +199,26 @@ docker compose --env-file .env up -d \
   ollama soc-portal nginx
 ```
 
-**First run only** — Docker downloads ~4 GB of images. Track progress:
+**First run only** — Docker downloads ~5 GB of images. Watch progress:
 
 ```bash
-docker compose ps
+watch -n 3 docker compose ps
+# Press Ctrl+C when all show "Up"
 ```
 
 Wait until these statuses appear (takes 3–5 minutes):
 
 ```
-NAME                 STATUS
-soc-grafana          Up (healthy)
-soc-nginx            Up
-soc-node-exporter    Up
-soc-ollama           Up (healthy)
-soc-portal           Up (healthy)
-soc-prometheus       Up
-soc-wazuh-dashboard  Up
-soc-wazuh-indexer    Up (healthy)
-soc-wazuh-manager    Up
-```
-
-Watch live status until all containers are up:
-
-```bash
-watch -n 3 docker compose ps
-# Press Ctrl+C when all show "Up"
+NAME                   STATUS
+soc-grafana            Up (healthy)
+soc-nginx              Up
+soc-node-exporter      Up
+soc-ollama             Up (healthy)
+soc-portal             Up (healthy)
+soc-prometheus         Up
+soc-wazuh-dashboard    Up
+soc-wazuh-indexer      Up (healthy)
+soc-wazuh-manager      Up
 ```
 
 ---
@@ -205,7 +226,6 @@ watch -n 3 docker compose ps
 ## 7. First-Run Initialization (Required Once)
 
 > **This step is required exactly once** — after the first `docker compose up`.  
-> It initializes the OpenSearch security index so Wazuh authentication works.  
 > On subsequent restarts, skip to Section 8.
 
 ### 7a. Initialize the OpenSearch Security Index
@@ -236,13 +256,13 @@ ERR: Seems you use a node certificate which is also an admin certificate
 Done with success
 ```
 
-### 7b. Set the Admin Password
+### 7b. Set the Wazuh Admin Password
 
 ```bash
-# Step 1 — generate a bcrypt hash of your password
+# Step 1 — generate a bcrypt hash of your WAZUH_API_PASSWORD
 HASH=$(docker exec soc-portal node -e "
   const b = require('bcryptjs');
-  console.log(b.hashSync('SecurePassword1!', 12));
+  console.log(b.hashSync('ChangeThisWazuhPassword1!', 12));
 ")
 echo "Hash: $HASH"
 
@@ -277,9 +297,9 @@ docker compose --env-file .env restart wazuh-manager wazuh-dashboard soc-portal
 sleep 30
 ```
 
-### 7d. Pull the LLM Model (runs once, takes 2–5 min)
+### 7d. Pull the LLM Model (runs once, ~5 min)
 
-The stack uses a **pinned model** (`llama3.2:3b`, ~2 GB) and a **pinned Ollama image** (`0.4.7`) so disk usage stays fixed and nothing grows on restart.
+The stack uses a **pinned model** (`qwen2.5:7b-instruct-q4_K_M`, ~4.4 GB) and a **pinned Ollama image** (`0.4.7`) so disk usage stays fixed and nothing grows on restart.
 
 ```bash
 docker compose --env-file .env up -d ollama-init
@@ -291,21 +311,21 @@ docker logs soc-ollama-init -f
 
 ## 8. Verify All Services
 
-> Run these commands **on the VM itself** using `localhost`, or from any machine on the LAN using the VM's IP (e.g. `192.168.1.105`).
+> Run these commands **on the VM itself** using `localhost`, or from any machine on the LAN using the VM's IP.
 
 ### Quick health check
 
 ```bash
-# From the VM — use localhost
-curl http://localhost/api/health
+# Portal API (HTTP redirects to HTTPS — use -L to follow)
+curl -Lsk https://localhost/api/health
 # Expected: {"ok":true,"ts":"..."}
 
-# From the host machine or another LAN device — use the VM's bridged IP
-curl http://192.168.1.105/api/health
+# From the host machine or another LAN device
+curl -sk https://192.168.1.105/api/health
 
 # Grafana
-curl -o /dev/null -w "HTTP %{http_code}\n" http://localhost/grafana/
-# Expected: HTTP 301 (redirect to login)
+curl -sk -o /dev/null -w "HTTP %{http_code}\n" https://localhost/grafana/
+# Expected: HTTP 302
 ```
 
 ### Check all containers
@@ -314,50 +334,57 @@ curl -o /dev/null -w "HTTP %{http_code}\n" http://localhost/grafana/
 docker compose ps
 ```
 
-All services should be `Up` or `Up (healthy)`. The only `Exit 0` is `soc-ollama-init` — that is normal.
+Expected states:
+
+| Container | Expected status |
+|-----------|----------------|
+| `soc-wazuh-indexer` | Up (healthy) |
+| `soc-wazuh-manager` | Up |
+| `soc-wazuh-dashboard` | Up |
+| `soc-grafana` | Up (healthy) |
+| `soc-prometheus` | Up |
+| `soc-node-exporter` | Up |
+| `soc-ollama` | Up (healthy) |
+| `soc-portal` | Up (healthy) |
+| `soc-nginx` | Up |
+| `soc-ollama-init` | Exit 0 (normal) |
 
 ### Test authenticated API
 
 ```bash
-# Replace localhost with the VM's bridged IP if testing from another machine
-BASE=http://localhost
+BASE=https://localhost
 
 # 1 — Get a CAPTCHA challenge
-curl $BASE/api/auth/captcha
+curl -sk $BASE/api/auth/captcha
 # Returns: {"id":"...","question":"What is X + Y?"}
 
-# 2 — Login (replace CAPTCHA_ID and ANSWER with real values from step 1)
-curl -X POST $BASE/api/auth/login \
+# 2 — Login (replace CAPTCHA_ID and ANSWER)
+curl -sk -X POST $BASE/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"SocPortal1!","captchaId":"CAPTCHA_ID","captchaAnswer":ANSWER}'
-# Returns: {"token":"eyJ...","user":{"username":"admin","role":"admin"}}
+  -d '{"username":"admin","password":"ChangeThisPortalPassword1!","captchaId":"CAPTCHA_ID","captchaAnswer":ANSWER}'
+# Returns: {"token":"eyJ..."}
 
-# 3 — Use token to call stats
-curl -H "Authorization: Bearer YOUR_TOKEN" $BASE/api/stats
-# Returns JSON with alert counts, agent count, manager info
+# 3 — Call stats with token
+curl -sk -H "Authorization: Bearer YOUR_TOKEN" $BASE/api/stats
 ```
 
 ---
 
 ## 9. Access the Web Interfaces
 
-Since the VM uses bridged networking, use the **VM's IP** (from Section 3) from any machine on the LAN, or `localhost` from inside the VM.
+Use the **VM's bridged IP** from other machines on the LAN, or `localhost` from inside the VM.
 
-| Interface | From the VM | From host / other LAN device |
-|-----------|------------|------------------------------|
-| **SOC Portal** | http://localhost | http://192.168.1.105 |
-| **Grafana** | http://localhost/grafana | http://192.168.1.105/grafana |
-| **Wazuh Dashboard** | http://localhost/wazuh | http://192.168.1.105/wazuh |
-
-**Credentials:**
-
-| Interface | Username | Password |
-|-----------|----------|----------|
-| **SOC Portal** | `admin` | `` |
-| **Grafana** | `admin` | `SocGrafana1!` |
-| **Wazuh Dashboard** | `admin` | `SecurePassword1!` |
+| Interface | URL (from VM) | URL (from LAN) | Username | Password |
+|-----------|--------------|----------------|----------|----------|
+| **SOC Portal** | https://localhost | https://192.168.1.105 | `admin` | `PORTAL_PASS` from `.env` |
+| **Grafana** | https://localhost/grafana | https://192.168.1.105/grafana | `admin` | `GRAFANA_PASSWORD` from `.env` |
+| **Wazuh Dashboard** | https://localhost/wazuh | https://192.168.1.105/wazuh | `admin` | `WAZUH_API_PASSWORD` from `.env` |
+| **OpenCTI** | https://localhost/opencti | https://192.168.1.105/opencti | `admin@soc.local` | `OPENCTI_ADMIN_PASSWORD` |
+| **Velociraptor** | https://localhost:8889 | https://192.168.1.105:8889 | `admin` | `VELOCIRAPTOR_ADMIN_PASSWORD` |
+| **Prometheus** | https://localhost/prometheus | https://192.168.1.105/prometheus | — | — |
 
 > Replace `192.168.1.105` with your actual VM IP from Section 3.  
+> The portal uses a self-signed TLS cert — click through the browser warning.  
 > The portal login page shows a CAPTCHA (math question). Answer it to proceed.
 
 ---
@@ -366,7 +393,7 @@ Since the VM uses bridged networking, use the **VM's IP** (from Section 3) from 
 
 ### 10.1 Dashboard
 
-1. Open http://192.168.1.105 (or `localhost` from inside the VM) → login
+1. Open https://192.168.1.105 → login
 2. **Dashboard** tab — KPI cards show total alerts, critical count, active agents
 3. Alert timeline chart shows events by hour
 4. Data is live from the Wazuh indexer
@@ -385,6 +412,8 @@ Since the VM uses bridged networking, use the **VM's IP** (from Section 3) from 
    - Returns: verdict (true_positive / false_positive / needs_review), confidence %, MITRE tactic, recommended action
 4. Click **Analyze All** to process every queued alert sequentially
 5. **Results** tab — shows all analyzed alerts with filter by verdict
+
+> First analysis per session takes ~15–20 seconds (model warm-up). Subsequent ones are faster.
 
 ### 10.4 AI Chat
 
@@ -415,16 +444,22 @@ Since the VM uses bridged networking, use the **VM's IP** (from Section 3) from 
 | Every 6 hours | `0 */6 * * *` |
 | First of month at midnight | `0 0 1 * *` |
 
+### 10.7 Agents
+
+1. Click **Agents** in the sidebar
+2. Click **Add Agent** — enrollment commands are pre-filled with your `SERVER_IP`
+3. Select OS (Linux / Windows) and tool (Wazuh, Node Exporter, Zeek, Suricata, etc.)
+4. Copy and run the commands on the target machine
+
 ---
 
 ## 11. Enrol Wazuh Agents
 
-> The Wazuh manager listens on the VM's bridged IP. Use `SERVER_IP` from your `.env` (e.g. `192.168.1.105`) as the manager address for all agents — including the VM itself.
+> Use `SERVER_IP` from your `.env` (the VM's bridged IP) as the manager address — not `127.0.0.1`.
 
 ### Option A — Enrol the Ubuntu VM itself (fastest)
 
 ```bash
-# Use the VM's own bridged IP so the agent registers correctly on the network
 MANAGER_IP=192.168.1.105   # replace with your SERVER_IP from .env
 
 curl -so wazuh-agent.deb \
@@ -432,8 +467,6 @@ curl -so wazuh-agent.deb \
 
 sudo WAZUH_MANAGER="$MANAGER_IP" dpkg -i ./wazuh-agent.deb
 sudo systemctl enable --now wazuh-agent
-
-# Check agent status
 sudo systemctl status wazuh-agent
 ```
 
@@ -450,7 +483,7 @@ sudo WAZUH_MANAGER="$MANAGER_IP" dpkg -i ./wazuh-agent.deb
 sudo systemctl enable --now wazuh-agent
 ```
 
-### Verify agent connectivity (from the SOC server)
+### Verify agent connectivity
 
 ```bash
 docker exec soc-wazuh-manager /var/ossec/bin/agent_control -l
@@ -459,9 +492,9 @@ docker exec soc-wazuh-manager /var/ossec/bin/agent_control -l
 
 ---
 
-## 12. Start Optional Services (Zeek / Suricata / OpenVAS)
+## 12. Start Optional Services
 
-> On Ubuntu, `network_mode: host` works natively — unlike Windows. These services can monitor real traffic.
+> Start these after the core stack is stable. They are resource-intensive — start only what you need.
 
 ### Zeek (network traffic analysis)
 
@@ -470,11 +503,11 @@ docker compose --env-file .env up -d zeek
 docker logs soc-zeek -f
 ```
 
-Zeek listens on the host network interface. Set the correct interface in `docker-compose.yml`:
+Verify it is capturing:
 
-```yaml
-environment:
-  - ZEEK_INTERFACE=eth0   # replace with your interface (ip link show)
+```bash
+docker exec soc-zeek tail -f /usr/local/zeek/logs/current/conn.log
+# JSON lines should appear as traffic flows
 ```
 
 ### Suricata (IDS/IPS)
@@ -484,26 +517,63 @@ docker compose --env-file .env up -d suricata
 docker logs soc-suricata -f
 ```
 
-Set the interface in `docker-compose.yml` the same way as Zeek.
-
-### OpenVAS (vulnerability scanner)
-
-> **Warning:** First boot takes 10–20 minutes for NVT feed sync. Do not interrupt it.
+Trigger a test alert:
 
 ```bash
-docker compose --env-file .env up -d openvas
-# Monitor sync progress
-docker logs soc-openvas -f
-# Done when you see: "Synchronization of NVTs ... done"
+curl http://testmyids.com
+# Check for an alert in eve.json
+docker exec soc-suricata tail -f /var/log/suricata/eve.json
 ```
 
-OpenVAS web UI is available at http://localhost/openvas (admin / admin — change on first login).
+### OpenCTI (threat intelligence platform)
+
+> OpenCTI requires ~2–3 GB RAM. On 16 GB, start it only when needed and stop Ollama first if under pressure.
+
+```bash
+docker compose --env-file .env up -d \
+  opencti-redis opencti-rabbitmq opencti-minio opencti-elasticsearch opencti
+```
+
+First boot takes 3–5 minutes while OpenCTI initialises its database. Monitor:
+
+```bash
+docker logs soc-opencti -f
+# Ready when you see: "GraphQL server ready"
+```
+
+Access: **https://192.168.1.105/opencti**  
+Login: `OPENCTI_ADMIN_EMAIL` / `OPENCTI_ADMIN_PASSWORD` from `.env`
+
+> **Important:** `OPENCTI_ADMIN_TOKEN` in `.env` must be a valid UUID before starting:
+> ```bash
+> python3 -c "import uuid; print(uuid.uuid4())"
+> ```
+
+### Velociraptor (endpoint visibility & DFIR)
+
+```bash
+docker compose --env-file .env up -d velociraptor
+docker logs soc-velociraptor -f
+# Ready when you see: "Listening on ..."
+```
+
+On first boot Velociraptor auto-generates its config and creates the admin user. This takes ~30 seconds.
+
+Access: **https://192.168.1.105:8889** (direct port, Velociraptor's own TLS cert)  
+Login: `admin` / `VELOCIRAPTOR_ADMIN_PASSWORD` from `.env`
+
+To enrol an endpoint, download the client from the Velociraptor UI → **Clients → Add client**.
+
+> Velociraptor also exposes port **8001** for agent connections — allow this through the firewall if enrolling remote endpoints:
+> ```bash
+> sudo ufw allow 8001/tcp
+> ```
 
 ---
 
 ## 13. Stop / Restart / Update
 
-### Stop all containers (preserves data volumes)
+### Stop all containers (preserves all data)
 
 ```bash
 docker compose down
@@ -512,7 +582,7 @@ docker compose down
 ### Stop and delete all data (full wipe)
 
 ```bash
-docker compose down -v   # WARNING: deletes all stored alerts, reports, DB
+docker compose down -v   # WARNING: deletes all stored alerts, reports, DB, threat intel
 ```
 
 ### Restart a single service
@@ -522,10 +592,11 @@ docker compose --env-file .env restart soc-portal
 docker compose --env-file .env restart wazuh-manager
 ```
 
-### Full restart after code changes
+### Rebuild portal after code changes
 
 ```bash
 docker compose --env-file .env up -d --build soc-portal
+docker compose --env-file .env restart nginx
 ```
 
 ### View live logs
@@ -534,11 +605,11 @@ docker compose --env-file .env up -d --build soc-portal
 docker compose logs -f soc-portal        # portal only
 docker compose logs -f                   # all services
 docker logs soc-wazuh-manager --tail 50  # wazuh manager
+docker logs soc-velociraptor --tail 50   # velociraptor
+docker logs soc-opencti --tail 50        # opencti
 ```
 
-### Auto-start on boot (systemd service)
-
-To have the stack start automatically on boot:
+### Auto-start on boot (systemd)
 
 ```bash
 sudo tee /etc/systemd/system/soc-portal.service > /dev/null <<EOF
@@ -559,7 +630,7 @@ TimeoutStartSec=300
 WantedBy=multi-user.target
 EOF
 
-# Update the WorkingDirectory path above, then enable
+# Update WorkingDirectory above, then enable
 sudo systemctl daemon-reload
 sudo systemctl enable soc-portal
 sudo systemctl start soc-portal
@@ -569,6 +640,175 @@ sudo systemctl start soc-portal
 
 ## 14. Troubleshooting Reference
 
+### "All services show Up but nothing works"
+
+This is the most common issue after a fresh deploy. `docker compose ps` shows every container as `Up` but the portal shows no data, Wazuh returns errors, and the LLM doesn't respond. Work through each service below.
+
+#### Step 1 — Run the deep health check
+
+This tests each service functionally, not just whether the container is running:
+
+```bash
+BASE=https://localhost
+
+echo "=== Portal API ===" && curl -sk $BASE/api/health
+echo ""
+echo "=== Wazuh Indexer (OpenSearch) ===" && \
+  curl -sk -u admin:ChangeThisWazuhPassword1! \
+  https://localhost:9200/_cluster/health 2>/dev/null || \
+  docker exec soc-wazuh-indexer curl -sk -u admin:ChangeThisWazuhPassword1! \
+  https://localhost:9200/_cluster/health
+echo ""
+echo "=== Wazuh Manager API ===" && \
+  docker exec soc-wazuh-manager curl -sk -u wazuh-wui:ChangeThisWazuhPassword1! \
+  https://localhost:55000/ | head -c 200
+echo ""
+echo "=== Ollama models ===" && \
+  docker exec soc-ollama curl -s http://localhost:11434/api/tags | head -c 200
+echo ""
+echo "=== Grafana ===" && \
+  docker exec soc-grafana curl -s http://localhost:3000/api/health
+echo ""
+echo "=== Prometheus ===" && \
+  docker exec soc-prometheus curl -s http://localhost:9090/-/healthy
+```
+
+#### Step 2 — Fix Wazuh (most common root cause)
+
+If `docker compose ps` shows `soc-wazuh-indexer` as `Up (healthy)` but the Stats API returns `Unauthorized` or `ECONNREFUSED`, the OpenSearch security index was never initialized.
+
+```bash
+# Check the actual error
+docker logs soc-wazuh-manager --tail 20
+docker logs soc-portal --tail 20
+
+# Fix: run the first-run security init (Section 7a and 7b)
+docker exec -u root soc-wazuh-indexer bash -c '
+  export JAVA_HOME=/usr/share/wazuh-indexer/jdk
+  /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
+    -cd /usr/share/wazuh-indexer/opensearch-security \
+    -icl -nhnv \
+    -cacert /usr/share/wazuh-indexer/config/certs/root-ca.pem \
+    -cert  /usr/share/wazuh-indexer/config/certs/indexer.pem \
+    -key   /usr/share/wazuh-indexer/config/certs/indexer-key.pem \
+    -h 127.0.0.1
+'
+docker compose --env-file .env restart wazuh-manager wazuh-dashboard soc-portal
+```
+
+#### Step 3 — Fix Ollama / LLM model missing
+
+If AI Chat returns no models or triage fails:
+
+```bash
+# Check if model was pulled
+docker exec soc-ollama ollama list
+
+# If empty, re-run the puller
+docker compose --env-file .env up -d ollama-init
+docker logs soc-ollama-init -f
+# Wait for: "Model ready."
+```
+
+#### Step 4 — Fix Grafana showing no data
+
+Grafana is running but dashboards are blank or show "No data":
+
+```bash
+# Check datasource connectivity from inside Grafana
+docker exec soc-grafana curl -sk \
+  -u admin:ChangeThisGrafanaPassword1! \
+  https://wazuh-indexer:9200/_cluster/health | head -c 200
+
+# If it fails, the Wazuh cert or password is wrong
+# Check Grafana datasource logs
+docker logs soc-grafana --tail 30 | grep -i error
+```
+
+If the OpenSearch datasource shows "Bad Gateway", Wazuh indexer isn't ready yet — wait 2–3 more minutes and reload.
+
+#### Step 5 — Fix Zeek / Suricata capturing nothing
+
+Container shows `Up` but no logs are being written:
+
+```bash
+# Check if log files exist and are growing
+docker exec soc-zeek ls -la /usr/local/zeek/logs/current/ 2>/dev/null || \
+  echo "Zeek logs directory not found — interface may be wrong"
+
+docker exec soc-suricata ls -la /var/log/suricata/ 2>/dev/null
+
+# Check the interface name matches SOC_NETWORK_INTERFACE in .env
+ip link show
+# Compare with:
+grep SOC_NETWORK_INTERFACE .env
+
+# If wrong, update .env and restart
+docker compose --env-file .env up -d zeek suricata
+```
+
+#### Step 6 — Fix OpenCTI still initializing
+
+OpenCTI shows `Up` but the web UI returns 502 or a loading spinner that never resolves:
+
+```bash
+# Check initialization progress
+docker logs soc-opencti --tail 30
+
+# Check Elasticsearch (OpenCTI's backend) is healthy
+docker exec soc-opencti-elasticsearch curl -s http://localhost:9200/_cluster/health
+
+# OpenCTI first boot takes 3–5 min — wait and check again
+watch -n 10 'docker logs soc-opencti --tail 5'
+```
+
+#### Step 7 — Fix Velociraptor not responding on :8889
+
+```bash
+# Check if config was generated
+docker exec soc-velociraptor ls /velociraptor/
+
+# Check startup logs
+docker logs soc-velociraptor --tail 30
+
+# If config generation failed, wipe and restart
+docker compose stop velociraptor
+docker volume rm soc-portal_velociraptor-data
+docker compose --env-file .env up -d velociraptor
+docker logs soc-velociraptor -f
+```
+
+#### Step 8 — Check resource exhaustion
+
+If multiple services are crashing or restarting, the VM is likely out of memory:
+
+```bash
+# See memory per container
+docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}"
+
+# See system memory
+free -h
+
+# See OOM kills in kernel log
+dmesg | grep -i "oom\|killed" | tail -20
+```
+
+If OOM kills are happening, reduce OpenSearch heap and stop optional services:
+
+```bash
+# Stop heavy optional services
+docker compose stop opencti opencti-elasticsearch opencti-redis \
+  opencti-rabbitmq opencti-minio velociraptor
+
+# Then in docker-compose.yml reduce:
+# OPENSEARCH_JAVA_OPTS: "-Xms256m -Xmx256m"
+# ES_JAVA_OPTS: "-Xms256m -Xmx256m"
+
+docker compose --env-file .env up -d wazuh-indexer
+```
+
+---
+
 ### Container won't start / keeps restarting
 
 ```bash
@@ -576,84 +816,74 @@ docker logs <container-name>
 # e.g.:
 docker logs soc-portal
 docker logs soc-wazuh-indexer
+docker logs soc-opencti
 ```
 
 ### Common issues and fixes
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `soc-wazuh-indexer` won't start, OOM killed | `vm.max_map_count` too low | `sudo sysctl -w vm.max_map_count=262144` (see Section 2) |
-| `soc-portal` exits with `SQLITE_CANTOPEN` | `/app/data` not writable | Rebuild: `docker compose build soc-portal` |
+| `soc-wazuh-indexer` or `soc-opencti-elasticsearch` OOM killed | `vm.max_map_count` too low | `sudo sysctl -w vm.max_map_count=262144` (see Section 2) |
+| `soc-portal` exits with `SQLITE_CANTOPEN` | `/app/data` not writable | `docker compose build soc-portal` |
 | `soc-nginx` exits with `host not found in upstream` | Upstream container not running | Start the missing container first |
-| Stats API returns `"Unauthorized"` | OpenSearch security index not initialized | Run Section 6a then 6b |
-| Stats API returns `"Unexpected token 'O'"` | OpenSearch returning HTML error | Security index not initialized — see above |
-| Chat models returns `[]` | LLM model not pulled | Run `docker compose up -d ollama-init` and wait |
-| Wazuh Dashboard blank / crash | Missing cert or env var | Check `docker logs soc-wazuh-dashboard` |
-| `wazuh-manager` API port 55000 not listening | Config error in ossec.conf | Check `docker logs soc-wazuh-manager` |
+| Stats API returns `"Unauthorized"` | OpenSearch security index not initialized | Run Section 7a then 7b |
+| Chat models returns `[]` | LLM model not pulled | `docker compose up -d ollama-init` and wait |
+| Wazuh Dashboard blank | Missing cert or env var | `docker logs soc-wazuh-dashboard` |
+| `wazuh-manager` port 55000 not listening | Config error | `docker logs soc-wazuh-manager` |
+| OpenCTI stuck at startup | Elasticsearch not ready | Wait 2–3 min; `docker logs soc-opencti-elasticsearch` |
+| Velociraptor not reachable on `:8889` | Config generation still running | Wait 30–60s; `docker logs soc-velociraptor` |
 | Permission denied on docker commands | User not in docker group | `sudo usermod -aG docker $USER && newgrp docker` |
-| Port 80 already in use | Another service (Apache/nginx) on port 80 | `sudo ss -tlnp \| grep :80` then stop that service |
+| Port 80 / 443 already in use | Apache or system nginx running | See below |
 
-### Port 80 conflict (common on Ubuntu)
+### Port conflict (common on Ubuntu)
 
 ```bash
-# Check what's using port 80
-sudo ss -tlnp | grep :80
+# Check what's using port 80 or 443
+sudo ss -tlnp | grep -E ':80|:443'
 
-# Stop Apache if it's running
-sudo systemctl stop apache2
-sudo systemctl disable apache2
+# Stop Apache if running
+sudo systemctl stop apache2 && sudo systemctl disable apache2
 
 # Stop system nginx if running
-sudo systemctl stop nginx
-sudo systemctl disable nginx
+sudo systemctl stop nginx && sudo systemctl disable nginx
+```
+
+### Out of memory — RAM saving tips
+
+```bash
+# 1. Reduce Wazuh/OpenSearch heap in docker-compose.yml:
+#    OPENSEARCH_JAVA_OPTS: "-Xms256m -Xmx256m"
+
+# 2. Stop services you are not actively using
+docker compose stop opencti opencti-elasticsearch opencti-redis opencti-rabbitmq opencti-minio
+
+# 3. Check what is using the most memory
+docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}" | sort -k2 -h
 ```
 
 ### Reset and re-initialize (nuclear option)
 
 ```bash
-# Stop and remove everything including volumes
 docker compose down -v --remove-orphans
 
-# Start fresh
 docker compose --env-file .env up -d \
   wazuh-indexer wazuh-manager wazuh-dashboard \
   grafana prometheus node-exporter \
   ollama soc-portal nginx
 
-# Wait 3-5 min, then run Section 6 (first-run initialization) again
-```
-
-### Check resource usage
-
-```bash
-docker stats --no-stream
-
-# System-wide memory
-free -h
-
-# Disk usage by Docker
-docker system df
-```
-
-If RAM is under pressure:
-
-```bash
-# In docker-compose.yml, reduce OpenSearch heap (e.g., from 512m to 256m):
-# OPENSEARCH_JAVA_OPTS: "-Xms256m -Xmx256m"
+# Wait 3–5 min, then run Section 7 (first-run initialization) again
 ```
 
 ### Firewall — allow access from other machines
 
 ```bash
-# Allow HTTP (port 80)
-sudo ufw allow 80/tcp
-
-# Allow Wazuh agent enrollment ports
-sudo ufw allow 1514/tcp
+sudo ufw allow 80/tcp    # HTTP (redirects to HTTPS)
+sudo ufw allow 443/tcp   # HTTPS — portal, Grafana, Wazuh, OpenCTI
+sudo ufw allow 8889/tcp  # Velociraptor GUI
+sudo ufw allow 8001/tcp  # Velociraptor agent enrollment
+sudo ufw allow 1514/tcp  # Wazuh agent
 sudo ufw allow 1514/udp
-sudo ufw allow 1515/tcp
-
-# Check status
+sudo ufw allow 1515/tcp  # Wazuh enrollment
 sudo ufw status
 ```
 
@@ -663,11 +893,32 @@ sudo ufw status
 
 | Service | Port | Access |
 |---------|------|--------|
-| **SOC Portal + all UIs** | `80` | http://\<server-ip\> |
-| **Wazuh Manager API** | `55000` | Internal only |
-| **Wazuh Agent syslog** | `514/udp` | For log forwarding |
-| **Wazuh Agent enrollment** | `1514, 1515` | For agent registration |
+| **SOC Portal + Grafana + Wazuh + OpenCTI** | `443` (HTTPS) | https://\<server-ip\> |
+| **HTTP redirect** | `80` | Redirects to HTTPS |
+| **Velociraptor GUI** | `8889` | https://\<server-ip\>:8889 |
+| **Velociraptor agent** | `8001` | For agent connections |
+| **Wazuh agent syslog** | `514/udp` | For log forwarding |
+| **Wazuh agent enrollment** | `1514, 1515` | For agent registration |
 
 ---
 
-*Last verified: 2026-05-15 with Docker Engine 26.x, Docker Compose v2.27 on Ubuntu 22.04 LTS.*
+## Stack Overview
+
+| Service | Role | RAM (approx) |
+|---------|------|-------------|
+| Wazuh Indexer (OpenSearch) | SIEM data store | ~1–2 GB |
+| Wazuh Manager | Log collection, rules engine | ~512 MB |
+| Wazuh Dashboard | SIEM UI | ~512 MB |
+| Grafana | Metrics dashboards | ~256 MB |
+| Prometheus + Node Exporter | Metrics collection | ~128 MB |
+| Ollama (`qwen2.5:7b`) | Local LLM | ~5 GB |
+| SOC Portal | Main web app | ~256 MB |
+| Nginx | Reverse proxy + TLS | ~64 MB |
+| OpenCTI + deps *(optional)* | Threat intelligence | ~2–3 GB |
+| Velociraptor *(optional)* | DFIR / endpoint visibility | ~256 MB |
+| Zeek *(optional)* | Network traffic analysis | ~256 MB |
+| Suricata *(optional)* | Network IDS/IPS | ~256 MB |
+
+---
+
+*Last verified: 2026-05-18 with Docker Engine 26.x, Docker Compose v2.27 on Ubuntu 22.04 LTS.*

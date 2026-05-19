@@ -23,8 +23,8 @@ WORKDIR /app
 # Production environment
 ENV NODE_ENV=production
 
-# Install only necessary runtime utilities (curl for healthcheck)
-RUN apk add --no-cache curl
+# curl for healthcheck, git for detection rule updates, docker-cli for ContainerMonitor
+RUN apk add --no-cache curl git docker-cli
 
 # Copy only what's needed for production
 COPY --from=builder /build/dist ./public

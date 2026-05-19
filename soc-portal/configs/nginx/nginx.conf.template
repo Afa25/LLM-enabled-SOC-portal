@@ -1,3 +1,5 @@
+  server_tokens off;
+
   # Docker internal DNS
   resolver 127.0.0.11 valid=30s ipv6=off;
   resolver_timeout 5s;
@@ -7,13 +9,32 @@
   gzip       on;
   gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
 
+  # Rate limits — portal login page and API only.
+  # Tool proxies (Wazuh, Grafana, etc.) are NOT rate-limited here;
+  # they generate hundreds of legitimate sub-requests per page load.
   limit_req_zone $binary_remote_addr zone=portal:10m rate=30r/m;
-  limit_req_zone $binary_remote_addr zone=api:10m    rate=120r/m;
+  limit_req_zone $binary_remote_addr zone=api:10m    rate=300r/m;
+
+  # Auth-request cache — validates the portal session token once per minute
+  # per unique token instead of on every single sub-request.
+  # Key = session cookie + bearer header so each user gets their own cache slot.
+  proxy_cache_path /tmp/nginx_auth_cache
+                   levels=1:2
+                   keys_zone=auth_cache:5m
+                   max_size=50m
+                   inactive=10m
+                   use_temp_path=off;
 
   # Wazuh admin credentials injected from .env at container startup via envsubst.
-  # Set WAZUH_BASIC_AUTH_B64 = base64("admin:<WAZUH_API_PASSWORD>")
+  # Set WAZUH_BASIC_AUTH_B64 = base64("admin:<WAZUH_INDEXER_PASSWORD>")
   map $host $wazuh_basic_auth {
     default "Basic ${WAZUH_BASIC_AUTH_B64}";
+  }
+
+  # Detect WebSocket upgrade requests so we can set Connection correctly.
+  map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
   }
 
   # ── HTTP → HTTPS redirect ─────────────────────────────────────
@@ -41,12 +62,22 @@
     add_header X-Content-Type-Options    nosniff                               always;
     add_header X-XSS-Protection          "1; mode=block"                       always;
     add_header Referrer-Policy           "strict-origin-when-cross-origin"     always;
+    add_header Content-Security-Policy   "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss:; font-src 'self' data:; frame-ancestors 'none';" always;
 
     # ─────────────────────────────────────────────────────────────
-    # INTERNAL — portal SSO validation endpoint (nginx auth_request)
+    # INTERNAL — portal SSO validation (nginx auth_request)
+    # Cached per token for 2 minutes so repeated sub-requests from
+    # Wazuh / Grafana / OpenCTI don't pound the portal validate endpoint.
     # ─────────────────────────────────────────────────────────────
     location = /auth-check {
       internal;
+
+      proxy_cache            auth_cache;
+      proxy_cache_valid      200 2m;
+      proxy_cache_key        "$cookie_soc_session$http_authorization";
+      proxy_cache_lock       on;
+      proxy_ignore_headers   Cache-Control Expires Set-Cookie;
+
       set $upstream_portal http://soc-portal:4000;
       proxy_pass              $upstream_portal/api/auth/validate;
       proxy_pass_request_body off;
@@ -64,6 +95,9 @@
       limit_req zone=portal burst=20 nodelay;
       set $upstream_portal http://soc-portal:4000;
       proxy_pass         $upstream_portal;
+      proxy_http_version 1.1;
+      proxy_set_header   Upgrade           $http_upgrade;
+      proxy_set_header   Connection        $connection_upgrade;
       proxy_set_header   Host              $host;
       proxy_set_header   X-Real-IP         $remote_addr;
       proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
@@ -73,9 +107,10 @@
 
     # ── API (longer timeout for LLM + SSE) ───────────────────
     location /api/ {
-      limit_req zone=api burst=50 nodelay;
+      limit_req zone=api burst=100 nodelay;
       set $upstream_portal http://soc-portal:4000;
       proxy_pass         $upstream_portal;
+      proxy_http_version 1.1;
       proxy_set_header   Host              $host;
       proxy_set_header   X-Real-IP         $remote_addr;
       proxy_set_header   X-Forwarded-Proto $scheme;
@@ -85,40 +120,47 @@
     }
 
     # ── Grafana ───────────────────────────────────────────────
+    # proxy_pass without trailing slash preserves the /grafana/ prefix so
+    # Grafana (serve_from_sub_path=true) receives the correct path.
+    # WebSocket support is required for Grafana Live (/grafana/api/live/ws).
     location /grafana/ {
       auth_request      /auth-check;
       error_page 401 = @sso_login;
 
+      auth_request_set $grafana_user $upstream_http_x_auth_user;
+
       set $upstream_grafana http://grafana:3000;
-      proxy_pass       $upstream_grafana/;
-      proxy_set_header Host              $host;
-      proxy_set_header X-Real-IP         $remote_addr;
-      proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_pass         $upstream_grafana;
+      proxy_http_version 1.1;
+      proxy_set_header   Upgrade           $http_upgrade;
+      proxy_set_header   Connection        $connection_upgrade;
+      proxy_set_header   Host              $host;
+      proxy_set_header   X-Real-IP         $remote_addr;
+      proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+      proxy_set_header   X-Forwarded-Proto $scheme;
+      proxy_set_header   X-WEBAUTH-USER    $grafana_user;
+      proxy_set_header   X-WEBAUTH-ROLE    Admin;
+      proxy_read_timeout 300s;
     }
 
     # ── Wazuh Dashboard ───────────────────────────────────────
+    # Dashboard is HTTPS-only with a self-signed cert — proxy over SSL,
+    # skip cert hostname check (cert has IP SAN, not DNS name).
     location /wazuh/ {
       auth_request      /auth-check;
       error_page 401 = @sso_login;
 
-      set $upstream_wazuh http://wazuh-dashboard:5601;
+      set $upstream_wazuh https://wazuh-dashboard:5601;
       proxy_pass          $upstream_wazuh;
+      proxy_http_version  1.1;
+      proxy_set_header    Upgrade           $http_upgrade;
+      proxy_set_header    Connection        $connection_upgrade;
+      proxy_ssl_verify    off;
       proxy_set_header    Host              $host;
       proxy_set_header    X-Real-IP         $remote_addr;
       proxy_set_header    X-Forwarded-For   $proxy_add_x_forwarded_for;
       proxy_set_header    Authorization     $wazuh_basic_auth;
-    }
-
-    # ── Prometheus ────────────────────────────────────────────
-    location /prometheus/ {
-      auth_request      /auth-check;
-      error_page 401 = @sso_login;
-
-      set $upstream_prometheus http://prometheus:9090;
-      proxy_pass       $upstream_prometheus;
-      proxy_set_header Host       $host;
-      proxy_set_header X-Real-IP  $remote_addr;
+      proxy_read_timeout  300s;
     }
 
     # ── OpenCTI ───────────────────────────────────────────────
@@ -128,11 +170,30 @@
 
       set $upstream_opencti http://opencti:8080;
       proxy_pass         $upstream_opencti/opencti/;
+      proxy_http_version 1.1;
+      proxy_set_header   Upgrade           $http_upgrade;
+      proxy_set_header   Connection        $connection_upgrade;
       proxy_set_header   Host              $host;
       proxy_set_header   X-Real-IP         $remote_addr;
       proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
       proxy_set_header   X-Forwarded-Proto $scheme;
       proxy_read_timeout 120s;
       proxy_buffering    off;
+      proxy_hide_header  X-Frame-Options;
+      proxy_hide_header  Content-Security-Policy;
+      add_header         X-Frame-Options "SAMEORIGIN";
+    }
+
+    # ── Prometheus ────────────────────────────────────────────
+    location /prometheus/ {
+      auth_request      /auth-check;
+      error_page 401 = @sso_login;
+
+      set $upstream_prometheus http://prometheus:9090;
+      proxy_pass       $upstream_prometheus/prometheus/;
+      proxy_set_header Host              $host;
+      proxy_set_header X-Real-IP         $remote_addr;
+      proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
     }
   }

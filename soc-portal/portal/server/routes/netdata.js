@@ -11,7 +11,6 @@ const SURICATA_LOG   = process.env.SURICATA_LOG   || '/data/suricata/eve.json';
 const ZEEK_LOG_DIR   = process.env.ZEEK_LOG_DIR   || '/data/zeek';
 
 // ── GET /api/netdata/prometheus ───────────────────────────────
-// Query key Prometheus metrics via instant-query API
 router.get('/prometheus', auth, async (req, res) => {
   const queries = {
     cpu_pct:    '100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)',
@@ -21,7 +20,6 @@ router.get('/prometheus', auth, async (req, res) => {
     net_tx_kbs: 'sum(rate(node_network_transmit_bytes_total{device!~"lo|veth.*|docker.*"}[5m])) / 1024',
     uptime_s:   'node_time_seconds - node_boot_time_seconds',
   };
-
   const results = {};
   try {
     await Promise.all(
