@@ -497,6 +497,7 @@ function Start-Platform {
     Write-Host ""
     Write-Info "Monitor: .\setup.ps1 logs"
     Write-Info "Status:  .\setup.ps1 status"
+    Test-DiskSaturation 80
 }
 
 function Stop-Platform {
@@ -513,6 +514,7 @@ function Restart-Platform {
 }
 
 function Show-Status {
+    Test-DiskSaturation 80
     Write-Host ""
     Write-Host "  Container Status" -ForegroundColor White
     Write-Host ""
@@ -582,6 +584,56 @@ function Backup-Platform {
     }
 }
 
+function Reset-PortalPassword {
+    if (-not (Test-Path ".env")) {
+        Write-Err ".env not found -- run: .\setup.ps1 start  first"
+        return
+    }
+
+    $user = (Get-Content ".env" | Where-Object { $_ -match "^PORTAL_USER=" } | ForEach-Object { $_ -replace "^PORTAL_USER=", "" } | Select-Object -First 1)
+    $pass = (Get-Content ".env" | Where-Object { $_ -match "^PORTAL_PASS=" } | ForEach-Object { $_ -replace "^PORTAL_PASS=", "" } | Select-Object -First 1)
+    if ([string]::IsNullOrWhiteSpace($user)) { $user = "admin" }
+
+    Write-Heading "Reset portal admin password"
+
+    if ([string]::IsNullOrWhiteSpace($pass)) {
+        Write-Warn "PORTAL_PASS not found in .env -- enter a new password"
+        $pass = Read-Input "New password for '$user'" "" -IsPassword
+        if ([string]::IsNullOrWhiteSpace($pass)) {
+            Write-Err "Password cannot be empty"
+            return
+        }
+        Update-EnvVar "PORTAL_PASS" $pass
+        Write-Ok ".env updated"
+    }
+
+    Write-Info "Resetting password for user: $user"
+
+    $script = @"
+const b = require('bcryptjs');
+const D = require('better-sqlite3');
+const db = new D(require('path').join(process.env.DATA_DIR||'/app/data','soc.db'));
+const hash = b.hashSync('$pass', 10);
+const u = '$user';
+const exists = db.prepare('SELECT id FROM users WHERE username=?').get(u);
+if (exists) {
+  db.prepare('UPDATE users SET password=? WHERE username=?').run(hash, u);
+  console.log('Password updated for:', u);
+} else {
+  db.prepare('INSERT INTO users (username,password,role) VALUES (?,?,?)').run(u, hash, 'admin');
+  console.log('Admin user created:', u);
+}
+db.close();
+"@
+
+    docker exec soc-portal node -e $script
+    if ($LASTEXITCODE -eq 0) {
+        Write-Ok "Done -- login with username '$user' and the password from credentials.txt"
+    } else {
+        Write-Err "Failed -- is soc-portal running? Check: .\setup.ps1 status"
+    }
+}
+
 function Invoke-Reconfigure {
     Write-Warn "This will delete .env and re-run the wizard."
     Write-Host ""
@@ -592,6 +644,126 @@ function Invoke-Reconfigure {
     Invoke-SetupWizard
     $go = Read-Confirm "Start the platform now?"
     if ($go) { Start-Platform }
+}
+
+function Test-DiskSaturation {
+    param([int]$Threshold = 80)
+    try {
+        $drive = Get-PSDrive (Split-Path $PWD -Qualifier).TrimEnd(':') -ErrorAction Stop
+        if (($drive.Used + $drive.Free) -gt 0) {
+            $pct = [math]::Round($drive.Used / ($drive.Used + $drive.Free) * 100)
+            if ($pct -ge $Threshold) {
+                Write-Warn "Disk at ${pct}% capacity -- run: .\setup.ps1 export-data  to free space"
+            }
+        }
+    } catch {}
+}
+
+function Show-DiskUsage {
+    Write-Heading "Disk & Volume Usage"
+    Write-Host ""
+    Write-Info "Host filesystem:"
+    try {
+        $drive   = Get-PSDrive (Split-Path $PWD -Qualifier).TrimEnd(':') -ErrorAction Stop
+        $usedGB  = [math]::Round($drive.Used / 1GB, 1)
+        $freeGB  = [math]::Round($drive.Free / 1GB, 1)
+        $totalGB = $usedGB + $freeGB
+        $pct     = if ($totalGB -gt 0) { [math]::Round($usedGB / $totalGB * 100) } else { 0 }
+        Write-Host "    Used: ${usedGB}GB / ${totalGB}GB  (${pct}% used, ${freeGB}GB free)" -ForegroundColor White
+    } catch { Write-Warn "Could not read drive info" }
+    Write-Host ""
+    Write-Info "Docker system:"
+    docker system df
+    Test-DiskSaturation 80
+}
+
+function Export-SocData {
+    param([int]$Days = 30)
+
+    $ts      = Get-Date -Format "yyyyMMdd_HHmmss"
+    $outName = "soc-export-$ts"
+    $outRoot = Join-Path $PWD "exports"
+    $outDir  = Join-Path $outRoot $outName
+
+    Write-Heading "SOC Data Export -- logs older than $Days days"
+    Write-Host ""
+
+    try {
+        $drive   = Get-PSDrive (Split-Path $PWD -Qualifier).TrimEnd(':') -ErrorAction Stop
+        $usedGB  = [math]::Round($drive.Used / 1GB, 1)
+        $totalGB = [math]::Round(($drive.Used + $drive.Free) / 1GB, 1)
+        $pct     = if ($totalGB -gt 0) { [math]::Round($drive.Used / ($drive.Used + $drive.Free) * 100) } else { 0 }
+        Write-Info "Disk usage before export: ${usedGB}GB / ${totalGB}GB (${pct}%)"
+    } catch {}
+    Write-Host ""
+
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    $absOut = (Resolve-Path $outDir).Path
+
+    $volumes = @(
+        @{ Vol = "zeek-logs";     Label = "Zeek network logs"  },
+        @{ Vol = "suricata-logs"; Label = "Suricata IDS logs"  },
+        @{ Vol = "wazuh-logs";    Label = "Wazuh agent logs"   }
+    )
+
+    foreach ($v in $volumes) {
+        Write-Info "  Exporting $($v.Label)..."
+        $shellCmd = "cd /srcdata && find . -type f -mtime +$Days > /tmp/fl.txt 2>/dev/null; if [ -s /tmp/fl.txt ]; then tar czf /destdata/$($v.Vol).tar.gz -T /tmp/fl.txt 2>/dev/null && echo '    Archived files'; else echo '    No files older than $Days days in $($v.Vol)'; fi"
+        docker run --rm `
+            -v "$($v.Vol):/srcdata:ro" `
+            -v "${absOut}:/destdata" `
+            alpine sh -c $shellCmd
+    }
+
+    Write-Info "  Exporting portal database..."
+    docker exec soc-portal sh -c "cp /app/data/soc.db /tmp/portal-db.bak 2>/dev/null && echo '    DB copied'" 2>$null
+    docker cp "soc-portal:/tmp/portal-db.bak" "$absOut\portal-db.bak" 2>$null
+    if ($LASTEXITCODE -ne 0) { Write-Warn "Portal DB export skipped (container may not be running)" }
+
+    Write-Host ""
+    Write-Info "Creating archive..."
+    $archivePath = "$outRoot\$outName.tar.gz"
+    if (Get-Command tar -ErrorAction SilentlyContinue) {
+        tar -czf $archivePath -C $outRoot $outName 2>$null
+    } else {
+        $archivePath = "$outRoot\$outName.zip"
+        Compress-Archive -Path $outDir -DestinationPath $archivePath -Force
+    }
+    Remove-Item -Recurse -Force $outDir -ErrorAction SilentlyContinue
+
+    $sz = if (Test-Path $archivePath) { [math]::Round((Get-Item $archivePath).Length / 1MB, 1) } else { "?" }
+    Write-Ok "Archive: $archivePath  (${sz} MB)"
+    Write-Host ""
+
+    $purge = Read-Confirm "Purge exported data from containers to free disk space?"
+    if ($purge) {
+        Write-Host ""
+        Write-Info "Purging old log files from volumes..."
+        foreach ($v in $volumes) {
+            docker run --rm -v "$($v.Vol):/data" alpine `
+                sh -c "find /data -type f -mtime +$Days -delete 2>/dev/null && echo '    Purged $($v.Vol)'" 2>$null
+        }
+        Write-Ok "Old log files purged"
+        Write-Host ""
+
+        $prune = Read-Confirm "Run Docker system prune (removes build cache and unused images)?"
+        if ($prune) {
+            docker system prune -f 2>$null
+            Write-Ok "Docker build cache cleared"
+        }
+
+        Write-Host ""
+        try {
+            $d2      = Get-PSDrive (Split-Path $PWD -Qualifier).TrimEnd(':') -ErrorAction Stop
+            $used2   = [math]::Round($d2.Used / 1GB, 1)
+            $total2  = [math]::Round(($d2.Used + $d2.Free) / 1GB, 1)
+            $pct2    = if ($total2 -gt 0) { [math]::Round($d2.Used / ($d2.Used + $d2.Free) * 100) } else { 0 }
+            Write-Info "Disk usage after cleanup: ${used2}GB / ${total2}GB (${pct2}%)"
+        } catch {}
+        Write-Host ""
+    }
+
+    Write-Warn "To transfer the archive, copy $archivePath to your backup destination."
 }
 
 function Manage-PacketCapture {
@@ -669,6 +841,9 @@ function Show-Usage {
     Write-Host "    update                         Pull latest images and rebuild"
     Write-Host "    backup                         Archive configs + .env"
     Write-Host "    reconfigure                    Re-run the setup wizard"
+    Write-Host "    reset-password                 Re-apply portal login password from .env"
+    Write-Host "    disk-usage                     Show host and Docker volume disk usage"
+    Write-Host "    export-data [days]             Compress + export logs older than N days"
     Write-Host "    packet-capture start [iface]   Enable Zeek+Suricata (Linux only)"
     Write-Host "    packet-capture stop             Disable Zeek+Suricata"
     Write-Host "    packet-capture interface [if]   Change listening interface"
@@ -691,6 +866,9 @@ switch ($Command.ToLower()) {
     "update"      { Update-Platform }
     "backup"      { Backup-Platform }
     "reconfigure"     { Invoke-Reconfigure }
+    "reset-password"  { Reset-PortalPassword }
+    "disk-usage"      { Show-DiskUsage }
+    "export-data"     { Export-SocData ([int]$(if ($Arg) { $Arg } else { 30 })) }
     "packet-capture"  { Manage-PacketCapture $Arg $Arg2 }
     { $_ -in "help", "--help", "-h" } { Show-Usage }
     default {

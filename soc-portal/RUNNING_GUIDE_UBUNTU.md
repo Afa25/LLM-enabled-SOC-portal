@@ -25,7 +25,9 @@ Covers installation, full startup, first-run initialization, feature testing, an
 10. [Enrol Wazuh Agents](#10-enrol-wazuh-agents)
 11. [Start Optional Services (Zeek / Suricata / OpenCTI / Velociraptor)](#11-start-optional-services)
 12. [Stop / Restart / Update](#12-stop--restart--update)
-13. [Troubleshooting Reference](#13-troubleshooting-reference)
+13. [Backup & Data Export](#13-backup--data-export)
+14. [Clean Install / Upgrading from a Previous Version](#14-clean-install--upgrading-from-a-previous-version)
+15. [Troubleshooting Reference](#15-troubleshooting-reference)
 
 ---
 
@@ -675,7 +677,161 @@ sudo systemctl start soc-portal
 
 ---
 
-## 13. Troubleshooting Reference
+## 13. Backup & Data Export
+
+### Quick config backup (no data)
+
+Saves your `.env`, all config files, and credentials to a compressed archive.  
+Use this before any upgrade or reconfiguration.
+
+```bash
+./setup.sh backup
+# Creates: backup_YYYYMMDD_HHMMSS.tar.gz  (configs + .env, no volume data)
+```
+
+### Full data export (logs + database)
+
+Compresses log data from Zeek, Suricata, and Wazuh volumes and exports the portal database.  
+Useful when disk is filling up — you can purge old data after exporting.
+
+```bash
+# Export logs older than 30 days (default)
+./setup.sh export-data
+
+# Export logs older than 14 days
+./setup.sh export-data 14
+```
+
+The command will:
+1. Show current disk usage
+2. Compress old log files from all storage volumes into `./exports/soc-export-<timestamp>.tar.gz`
+3. Snapshot the portal SQLite database
+4. Ask whether to **purge** the exported data from containers to free disk space
+5. Ask whether to run `docker system prune` to clear the Docker build cache
+
+Check current disk usage at any time:
+
+```bash
+./setup.sh disk-usage
+```
+
+### Transfer the export off-server
+
+```bash
+# From your workstation — copy the archive to a backup location
+scp user@192.168.1.105:/path/to/soc-portal/exports/soc-export-*.tar.gz /backups/
+```
+
+### What each backup method covers
+
+| Method | `.env` | Configs | Portal DB | Wazuh Alerts | Zeek/Suricata Logs |
+|--------|--------|---------|-----------|-------------|-------------------|
+| `./setup.sh backup` | ✓ | ✓ | ✗ | ✗ | ✗ |
+| `./setup.sh export-data` | ✗ | ✗ | ✓ | ✗ | ✓ |
+| `docker compose down -v` + snapshot | — | — | — | Full | Full |
+
+> **Note:** Wazuh alerts are stored in OpenSearch (the `wazuh-indexer-data` volume). A full OpenSearch snapshot requires the OpenSearch snapshot API and is beyond the scope of this guide. For most deployments the Grafana dashboards and exported logs are sufficient for recovery.
+
+### Restore a config backup
+
+```bash
+# Extract the backup
+tar xzf backup_20260522_120000.tar.gz
+
+# The extracted folder contains configs/ and .env
+# Copy them back to your soc-portal directory and restart
+./setup.sh restart
+```
+
+---
+
+## 14. Clean Install / Upgrading from a Previous Version
+
+> **Do this every time you install a new version or want a completely fresh deployment.**  
+> The most common cause of login failures, wrong passwords, and stale data is a previous installation's Docker volumes still being present.
+
+### Step 1 — Back up anything you want to keep (optional)
+
+```bash
+cd /path/to/LLM-enabled-SOC-portal/soc-portal
+
+# Back up your current .env and credentials before wiping
+cp .env .env.bak
+cp credentials.txt credentials.bak.txt
+
+# Export any logs you want to keep
+./setup.sh export-data
+```
+
+### Step 2 — Stop all containers and delete ALL volumes
+
+This is the complete wipe. It removes every Docker volume: Wazuh alerts, portal database, Grafana dashboards, OpenSearch indices, TLS certificates, Ollama models — everything.
+
+```bash
+docker compose down -v --remove-orphans
+```
+
+Expected output:
+```
+[+] Running 30/30
+ ✔ Container soc-nginx          Removed
+ ✔ Container soc-portal         Removed
+ ...
+ ✔ Volume soc-portal_wazuh-indexer-data  Removed
+ ✔ Volume soc-portal_portal-db           Removed
+ ...
+```
+
+### Step 3 — Remove old Docker images (frees disk space)
+
+```bash
+# Remove all images from the old stack
+docker compose down --rmi all 2>/dev/null || true
+
+# Remove dangling build cache
+docker system prune -f
+```
+
+### Step 4 — Delete old config and credentials
+
+```bash
+rm -f .env credentials.txt
+```
+
+> If you are upgrading and want to reuse your passwords, keep `.env.bak` open and copy values into the new wizard when prompted.
+
+### Step 5 — Pull the latest code
+
+```bash
+cd /path/to/LLM-enabled-SOC-portal
+git pull origin main
+cd soc-portal
+```
+
+### Step 6 — Run a fresh install
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+The wizard will detect no `.env` and start fresh. All volumes will be created new, the portal database will be seeded with the correct password, and Wazuh TLS certificates will be regenerated.
+
+After the stack is up, **run the first-run initialization again** (Section 6) — the OpenSearch security index does not survive a volume wipe.
+
+### Quick reference: wipe commands
+
+| Command | What it removes |
+|---------|----------------|
+| `docker compose down` | Stops containers only — data is preserved |
+| `docker compose down -v` | Stops containers + deletes all named volumes (all data) |
+| `docker compose down -v --remove-orphans` | Same + removes any leftover containers not in the compose file |
+| `docker system prune -f` | Removes dangling images, stopped containers, unused networks, build cache |
+| `docker system prune -af` | Same + removes **all** unused images (even tagged ones) — largest disk saving |
+
+---
+
+## 15. Troubleshooting Reference
 
 ### "All services show Up but nothing works"
 
@@ -861,6 +1017,7 @@ docker logs soc-opencti
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `soc-wazuh-indexer` or `soc-opencti-elasticsearch` OOM killed | `vm.max_map_count` too low | `sudo sysctl -w vm.max_map_count=262144` (see Section 2) |
+| Portal login fails with correct password | Old password hash in DB from previous install | `./setup.sh reset-password` |
 | `soc-portal` exits with `SQLITE_CANTOPEN` | `/app/data` not writable | `docker compose build soc-portal` |
 | `soc-nginx` exits with `host not found in upstream` | Upstream container not running | Start the missing container first |
 | Stats API returns `"Unauthorized"` | OpenSearch security index not initialized | Run Section 6a then 6b |

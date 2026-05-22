@@ -480,6 +480,118 @@ cmd_start() {
   blank
   info "Monitor: ${CYAN}./setup.sh logs${RESET}"
   info "Status:  ${CYAN}./setup.sh status${RESET}"
+  check_disk_saturation 80
+}
+
+# ── Disk saturation check ─────────────────────────────────────────────
+check_disk_saturation() {
+  local threshold="${1:-80}"
+  local pct
+  pct=$(df -P . 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}') || return 0
+  if [ "${pct:-0}" -ge "$threshold" ] 2>/dev/null; then
+    warn "Disk at ${pct}% capacity — run: ${CYAN}./setup.sh export-data${RESET} to free space"
+  fi
+}
+
+# ── Volume export / purge helpers ─────────────────────────────────────
+_vol_export() {
+  local vol="$1" days="$2" dest="$3"
+  info "  Exporting ${vol}..."
+  docker run --rm \
+    -v "${vol}:/srcdata:ro" \
+    -v "${dest}:/destdata" \
+    alpine sh -c "
+      cd /srcdata
+      find . -type f -mtime +${days} > /tmp/fl.txt 2>/dev/null
+      if [ -s /tmp/fl.txt ]; then
+        tar czf \"/destdata/${vol}.tar.gz\" -T /tmp/fl.txt 2>/dev/null
+        echo \"    Archived \$(wc -l < /tmp/fl.txt) files\"
+      else
+        echo '    No files older than ${days} days in ${vol}'
+      fi
+    " || warn "${vol} export skipped (volume may not exist)"
+}
+
+_vol_purge() {
+  local vol="$1" days="$2"
+  docker run --rm -v "${vol}:/data" alpine \
+    sh -c "find /data -type f -mtime +${days} -delete 2>/dev/null && echo '    Purged ${vol}'" \
+    || warn "${vol} purge skipped"
+}
+
+cmd_disk_usage() {
+  heading "Disk & Volume Usage"
+  blank
+  info "Host filesystem:"
+  df -h . 2>/dev/null | head -3 || true
+  blank
+  info "Docker system:"
+  docker system df 2>/dev/null || true
+  check_disk_saturation 80
+}
+
+cmd_export_data() {
+  local days="${1:-30}"
+  local export_root; export_root="$(pwd)/exports"
+  local ts; ts=$(date +%Y%m%d_%H%M%S)
+  local out_name="soc-export-${ts}"
+  local out_dir="${export_root}/${out_name}"
+
+  heading "SOC Data Export — logs older than ${days} days"
+
+  local pct
+  pct=$(df -P . 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}') || pct="?"
+  info "Disk usage before export: ${pct}%"
+  blank
+
+  mkdir -p "$out_dir"
+
+  _vol_export "zeek-logs"     "$days" "$out_dir"
+  _vol_export "suricata-logs" "$days" "$out_dir"
+  _vol_export "wazuh-logs"    "$days" "$out_dir"
+
+  # Portal database snapshot
+  info "  Exporting portal database..."
+  docker exec soc-portal sh -c "cp /app/data/soc.db /tmp/portal-db.bak 2>/dev/null && echo '    DB copied'" 2>/dev/null && \
+    docker cp soc-portal:/tmp/portal-db.bak "${out_dir}/portal-db.bak" 2>/dev/null || \
+    warn "Portal DB export skipped (container may not be running)"
+
+  # Bundle everything into a single archive
+  blank
+  info "Creating archive..."
+  tar czf "${export_root}/${out_name}.tar.gz" -C "$export_root" "$out_name" 2>/dev/null
+  rm -rf "$out_dir"
+
+  local sz
+  sz=$(du -sh "${export_root}/${out_name}.tar.gz" 2>/dev/null | cut -f1 || echo "?")
+  ok "Archive: ${export_root}/${out_name}.tar.gz  (${sz})"
+  blank
+
+  confirm "Purge exported data from containers to free disk space?"
+  if [ $? -eq 0 ]; then
+    blank
+    info "Purging old log files from volumes..."
+    _vol_purge "zeek-logs"     "$days"
+    _vol_purge "suricata-logs" "$days"
+    _vol_purge "wazuh-logs"    "$days"
+    ok "Old log files purged"
+    blank
+
+    confirm "Run Docker system prune (removes build cache and unused images)?"
+    if [ $? -eq 0 ]; then
+      docker system prune -f 2>/dev/null
+      ok "Docker build cache cleared"
+    fi
+
+    blank
+    local new_pct
+    new_pct=$(df -P . 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}') || new_pct="?"
+    info "Disk usage after cleanup: ${new_pct}%"
+    blank
+  fi
+
+  warn "To transfer the archive:"
+  info "  scp ${export_root}/${out_name}.tar.gz user@backup-server:/backups/"
 }
 
 cmd_packet_capture() {
@@ -567,6 +679,7 @@ cmd_restart() {
 }
 
 cmd_status() {
+  check_disk_saturation 80
   echo -e "${BOLD}  Container Status${RESET}"
   blank
   $COMPOSE ps
@@ -622,6 +735,58 @@ cmd_backup() {
   ok "Backup saved: $out"
 }
 
+cmd_reset_password() {
+  if [ ! -f .env ]; then
+    err ".env not found — run ./setup.sh start first"
+    exit 1
+  fi
+
+  local user pass
+  user=$(grep '^PORTAL_USER=' .env | cut -d= -f2)
+  pass=$(grep '^PORTAL_PASS=' .env | cut -d= -f2)
+  user="${user:-admin}"
+
+  heading "Reset portal admin password"
+
+  if [ -z "$pass" ]; then
+    warn "PORTAL_PASS not found in .env — enter a new password manually"
+    ask_secret "New password for '${user}'"
+    pass="$_INPUT"
+    if [ -z "$pass" ]; then
+      err "Password cannot be empty"
+      exit 1
+    fi
+    # Update .env
+    sed -i "s/^PORTAL_PASS=.*/PORTAL_PASS=${pass}/" .env
+    ok ".env updated"
+  fi
+
+  info "Resetting password for user: $user"
+
+  docker exec soc-portal node -e "
+    const b = require('bcryptjs');
+    const D = require('better-sqlite3');
+    const db = new D(require('path').join(process.env.DATA_DIR||'/app/data','soc.db'));
+    const hash = b.hashSync('${pass}', 10);
+    const u = '${user}';
+    const exists = db.prepare('SELECT id FROM users WHERE username=?').get(u);
+    if (exists) {
+      db.prepare('UPDATE users SET password=? WHERE username=?').run(hash, u);
+      console.log('Password updated for:', u);
+    } else {
+      db.prepare('INSERT INTO users (username,password,role) VALUES (?,?,?)').run(u, hash, 'admin');
+      console.log('Admin user created:', u);
+    }
+    db.close();
+  " 2>&1
+
+  if [ $? -eq 0 ]; then
+    ok "Done — login with username '${user}' and the password from credentials.txt"
+  else
+    err "Failed — is the soc-portal container running? Check: ./setup.sh status"
+  fi
+}
+
 cmd_reconfigure() {
   warn "This will delete .env and re-run the wizard."
   blank
@@ -648,6 +813,9 @@ usage() {
   echo -e "    ${BOLD}update${RESET}                         Pull latest Docker images and rebuild"
   echo -e "    ${BOLD}backup${RESET}                         Archive configs + .env to a .tar.gz"
   echo -e "    ${BOLD}reconfigure${RESET}                    Re-run the setup wizard"
+  echo -e "    ${BOLD}reset-password${RESET}                 Re-apply portal login password from .env"
+  echo -e "    ${BOLD}disk-usage${RESET}                     Show host and Docker volume disk usage"
+  echo -e "    ${BOLD}export-data${RESET} [days]             Compress + export logs older than N days"
   echo -e "    ${BOLD}packet-capture start${RESET} [iface]   Enable Zeek+Suricata (Linux only)"
   echo -e "    ${BOLD}packet-capture stop${RESET}             Disable Zeek+Suricata"
   echo -e "    ${BOLD}packet-capture interface${RESET} [if]   Change listening interface"
@@ -673,6 +841,9 @@ case "$CMD" in
   update)       cmd_update ;;
   backup)       cmd_backup ;;
   reconfigure)      cmd_reconfigure ;;
+  reset-password)   cmd_reset_password ;;
+  disk-usage)       cmd_disk_usage ;;
+  export-data)      cmd_export_data "$@" ;;
   packet-capture)   cmd_packet_capture "$@" ;;
   help|--help|-h)   usage ;;
   *)

@@ -114,16 +114,19 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_triage_analyst ON triage_results(analyst_status);
   `);
 
-  // Seed default admin user if not exists
-  const admin = db.prepare('SELECT id FROM users WHERE username = ?').get(
-    process.env.PORTAL_USER || 'admin'
-  );
+  // Seed or sync admin user from env on every startup
+  const adminUser = process.env.PORTAL_USER || 'admin';
+  const adminPass = process.env.PORTAL_PASS || 'SocPortal1!';
+  const admin = db.prepare('SELECT id FROM users WHERE username = ?').get(adminUser);
   if (!admin) {
-    const hash = bcrypt.hashSync(process.env.PORTAL_PASS || 'SocPortal1!', 10);
-    db.prepare('INSERT INTO users (username, password, role) VALUES (?,?,?)').run(
-      process.env.PORTAL_USER || 'admin', hash, 'admin'
-    );
-    console.log('Default admin user created.');
+    const hash = bcrypt.hashSync(adminPass, 10);
+    db.prepare('INSERT INTO users (username, password, role) VALUES (?,?,?)').run(adminUser, hash, 'admin');
+    console.log('Admin user created:', adminUser);
+  } else if (process.env.PORTAL_PASS) {
+    // Re-hash and update whenever PORTAL_PASS is explicitly set in env
+    const hash = bcrypt.hashSync(adminPass, 10);
+    db.prepare('UPDATE users SET password = ? WHERE username = ?').run(hash, adminUser);
+    console.log('Admin password synced from env for:', adminUser);
   }
 
   console.log('Database initialised at', DB_PATH);

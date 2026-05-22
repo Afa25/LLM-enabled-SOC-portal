@@ -215,6 +215,8 @@ services:
       - prometheus-data:/prometheus
       - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-targets:/etc/prometheus/targets
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       soc-net:
         ipv4_address: 172.20.0.14
@@ -226,9 +228,17 @@ services:
     image: prom/node-exporter:v1.7.0
     container_name: soc-node-exporter
     restart: unless-stopped
-    networks:
-      soc-net:
-        ipv4_address: 172.20.0.15
+    network_mode: host
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
 
   # ────────────────────────────────────────────────────────────────
   # ZEEK (network traffic analysis)
