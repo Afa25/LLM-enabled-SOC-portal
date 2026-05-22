@@ -10,7 +10,8 @@
 #>
 param(
     [string]$Command = "start",
-    [string]$Arg     = ""
+    [string]$Arg     = "",
+    [string]$Arg2    = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -124,6 +125,27 @@ function Get-PhysicalInterfaces {
     }
 }
 
+# ── .env helpers ─────────────────────────────────────────────────────
+function Update-EnvVar([string]$Key, [string]$Value) {
+    if (Test-Path ".env") {
+        $lines = Get-Content ".env"
+        $found = $false
+        $lines = $lines | ForEach-Object {
+            if ($_ -match "^$Key=") { "$Key=$Value"; $found = $true } else { $_ }
+        }
+        if (-not $found) { $lines += "$Key=$Value" }
+        [System.IO.File]::WriteAllLines(
+            (Join-Path $PWD ".env"),
+            $lines,
+            [System.Text.UTF8Encoding]::new($false)
+        )
+    }
+}
+
+function Set-PacketCaptureEnabled([bool]$Enabled) {
+    Update-EnvVar "ENABLE_PACKET_CAPTURE" (if ($Enabled) { "true" } else { "false" })
+}
+
 # ── Prerequisites ─────────────────────────────────────────────────────
 function Test-Prerequisites {
     Write-Heading "Checking prerequisites"
@@ -187,6 +209,16 @@ function Invoke-SetupWizard {
         if ($idx -ge 0 -and $idx -lt $ifaces.Count) { $ifaces[$idx] } else { $ifaces[0] }
     } else { $ifChoice }
     Write-Ok "Using interface: $NetIface"
+    Write-Host ""
+
+    # ── Packet capture ────────────────────────────────────────────────
+    Write-Heading "Packet capture (Zeek / Suricata IDS)"
+    Write-Warn "Requires Linux with network_mode: host"
+    Write-Warn "NOT supported on Docker Desktop (Windows/Mac)"
+    Write-Host ""
+    $EnableIDS    = Read-Confirm "Enable Zeek and Suricata for packet capture?"
+    $EnableIDSStr = if ($EnableIDS) { "true" } else { "false" }
+    Write-Ok "Packet capture: $EnableIDSStr"
     Write-Host ""
 
     # ── LLM model ─────────────────────────────────────────────────────
@@ -301,6 +333,9 @@ OLLAMA_MODEL=$LlmModel
 # -- Network ---------------------------------------------------
 SOC_NETWORK_INTERFACE=$NetIface
 SERVER_IP=$ServerIP
+
+# -- Packet capture --------------------------------------------
+ENABLE_PACKET_CAPTURE=$EnableIDSStr
 "@
 
     # Write UTF-8 without BOM so Docker can read it
@@ -408,6 +443,24 @@ function Start-Platform {
     if ($LASTEXITCODE -ne 0) {
         Write-Err "docker compose failed. Check logs: .\setup.ps1 logs"
         exit 1
+    }
+
+    $idsEnabled = ""
+    if (Test-Path ".env") {
+        $idsEnabled = (Get-Content ".env" |
+            Where-Object { $_ -match "^ENABLE_PACKET_CAPTURE=" } |
+            ForEach-Object { $_ -replace "^ENABLE_PACKET_CAPTURE=", "" } |
+            Select-Object -First 1)
+    }
+    if ($idsEnabled -eq "true") {
+        $idsIface = (Get-Content ".env" |
+            Where-Object { $_ -match "^SOC_NETWORK_INTERFACE=" } |
+            ForEach-Object { $_ -replace "^SOC_NETWORK_INTERFACE=", "" } |
+            Select-Object -First 1)
+        Write-Info "Packet capture (Zeek/Suricata) active on interface: $idsIface"
+    } else {
+        docker compose stop zeek suricata 2>$null
+        Write-Info "Packet capture (Zeek/Suricata) skipped -- use: .\setup.ps1 packet-capture start"
     }
 
     Write-Heading "Waiting for core services"
@@ -541,6 +594,67 @@ function Invoke-Reconfigure {
     if ($go) { Start-Platform }
 }
 
+function Manage-PacketCapture {
+    param([string]$SubCommand = "status", [string]$Interface = "")
+    switch ($SubCommand.ToLower()) {
+        "start" {
+            if (-not [string]::IsNullOrWhiteSpace($Interface)) {
+                Update-EnvVar "SOC_NETWORK_INTERFACE" $Interface
+                Write-Ok "Interface set to: $Interface"
+            }
+            Set-PacketCaptureEnabled $true
+            Write-Info "Starting Zeek and Suricata..."
+            docker compose up -d zeek suricata
+            Write-Ok "Packet capture running"
+        }
+        "stop" {
+            Set-PacketCaptureEnabled $false
+            docker compose stop zeek suricata
+            Write-Ok "Packet capture stopped"
+        }
+        "interface" {
+            $newIface = $Interface
+            if ([string]::IsNullOrWhiteSpace($newIface)) {
+                $ifaces = Get-PhysicalInterfaces
+                Write-Host "  Available interfaces:" -ForegroundColor DarkGray
+                for ($i = 0; $i -lt $ifaces.Count; $i++) {
+                    Write-Host "    $($i+1)) $($ifaces[$i])" -ForegroundColor Cyan
+                }
+                Write-Host ""
+                $choice = Read-Input "Interface name or number" "1"
+                $newIface = if ($choice -match '^\d+$') {
+                    $idx = [int]$choice - 1
+                    if ($idx -ge 0 -and $idx -lt $ifaces.Count) { $ifaces[$idx] } else { $ifaces[0] }
+                } else { $choice }
+            }
+            Update-EnvVar "SOC_NETWORK_INTERFACE" $newIface
+            Write-Ok "Interface set to: $newIface"
+            Write-Warn "Restarting Zeek and Suricata to apply..."
+            docker compose stop zeek suricata 2>$null
+            docker compose up -d zeek suricata
+            Write-Ok "Packet capture restarted on: $newIface"
+        }
+        "status" {
+            Write-Host ""
+            Write-Host "  Packet capture status:" -ForegroundColor White
+            $enabled = "false"
+            $iface   = "eth0"
+            if (Test-Path ".env") {
+                $e = (Get-Content ".env" | Where-Object { $_ -match "^ENABLE_PACKET_CAPTURE=" } | ForEach-Object { $_ -replace "^ENABLE_PACKET_CAPTURE=", "" } | Select-Object -First 1)
+                $f = (Get-Content ".env" | Where-Object { $_ -match "^SOC_NETWORK_INTERFACE=" }  | ForEach-Object { $_ -replace "^SOC_NETWORK_INTERFACE=", ""  } | Select-Object -First 1)
+                if (-not [string]::IsNullOrWhiteSpace($e)) { $enabled = $e }
+                if (-not [string]::IsNullOrWhiteSpace($f)) { $iface   = $f }
+            }
+            Write-Info "Enabled: $enabled  |  Interface: $iface"
+            Write-Host ""
+            docker compose ps zeek suricata
+        }
+        default {
+            Write-Err "Usage: .\setup.ps1 packet-capture [start [iface] | stop | interface [iface] | status]"
+        }
+    }
+}
+
 function Show-Usage {
     Write-Host ""
     Write-Host "  Usage:  .\setup.ps1 [command]" -ForegroundColor White
@@ -551,10 +665,14 @@ function Show-Usage {
     Write-Host "    restart            Restart all containers"
     Write-Host "    status             Show container status"
     Write-Host "    logs [service]     Stream logs (all, or a specific service)"
-    Write-Host "    pull-model [name]  Download a different Ollama LLM model"
-    Write-Host "    update             Pull latest images and rebuild"
-    Write-Host "    backup             Archive configs + .env"
-    Write-Host "    reconfigure        Re-run the setup wizard"
+    Write-Host "    pull-model [name]              Download a different Ollama LLM model"
+    Write-Host "    update                         Pull latest images and rebuild"
+    Write-Host "    backup                         Archive configs + .env"
+    Write-Host "    reconfigure                    Re-run the setup wizard"
+    Write-Host "    packet-capture start [iface]   Enable Zeek+Suricata (Linux only)"
+    Write-Host "    packet-capture stop             Disable Zeek+Suricata"
+    Write-Host "    packet-capture interface [if]   Change listening interface"
+    Write-Host "    packet-capture status           Show IDS container status"
     Write-Host ""
     Write-Host "  Example service names for logs:" -ForegroundColor DarkGray
     Write-Host "    soc-portal  soc-wazuh-manager  soc-wazuh-indexer" -ForegroundColor DarkGray
@@ -572,7 +690,8 @@ switch ($Command.ToLower()) {
     "pull-model"  { Pull-LlmModel $Arg }
     "update"      { Update-Platform }
     "backup"      { Backup-Platform }
-    "reconfigure" { Invoke-Reconfigure }
+    "reconfigure"     { Invoke-Reconfigure }
+    "packet-capture"  { Manage-PacketCapture $Arg $Arg2 }
     { $_ -in "help", "--help", "-h" } { Show-Usage }
     default {
         Write-Err "Unknown command: $Command"

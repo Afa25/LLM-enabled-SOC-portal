@@ -32,8 +32,8 @@ COPY --from=builder /build/server ./server
 COPY --from=builder /build/node_modules ./node_modules
 COPY --from=builder /build/package.json ./
 
-# Create data directory and set ownership before dropping to node user
-RUN mkdir -p /app/data && chown -R node:node /app/data
+# Create writable directories before dropping to node user
+RUN mkdir -p /app/data /app/config && chown -R node:node /app/data /app/config
 
 # Security: Set a non-root user
 USER node

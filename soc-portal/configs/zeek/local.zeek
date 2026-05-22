@@ -20,9 +20,8 @@
 # Log in JSON format (for Wazuh/Filebeat ingestion)
 @load tuning/json-logs
 
-# Enable file analysis with MD5+SHA1 hashing
+# Enable file extraction prefix
 redef FileExtract::prefix = "/tmp/zeek_files/";
-redef SHA1::default_digest_algorithm = "sha1";
 
 # DNS: log all queries including failed resolutions
 redef DNS::max_pending_msgs = 50000;

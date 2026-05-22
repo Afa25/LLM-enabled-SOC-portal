@@ -15,16 +15,17 @@ Covers installation, full startup, first-run initialization, feature testing, an
 2. [Install Docker](#2-install-docker)
 3. [Find Your VM's Bridged IP](#3-find-your-vms-bridged-ip)
 4. [Clone the Repository](#4-clone-the-repository)
-5. [Configure Environment](#5-configure-environment)
-6. [Start the Stack](#6-start-the-stack)
-7. [First-Run Initialization (Required Once)](#7-first-run-initialization-required-once)
-8. [Verify All Services](#8-verify-all-services)
-9. [Access the Web Interfaces](#9-access-the-web-interfaces)
-10. [Feature Testing Walkthrough](#10-feature-testing-walkthrough)
-11. [Enrol Wazuh Agents](#11-enrol-wazuh-agents)
-12. [Start Optional Services (Zeek / Suricata / OpenCTI / Velociraptor)](#12-start-optional-services)
-13. [Stop / Restart / Update](#13-stop--restart--update)
-14. [Troubleshooting Reference](#14-troubleshooting-reference)
+5. [Setup & Start](#5-setup--start)
+   - [Option 1 — Automated script (recommended)](#option-1--automated-script-recommended)
+   - [Option 2 — Manual setup](#option-2--manual-setup)
+6. [First-Run Initialization (Required Once)](#6-first-run-initialization-required-once)
+7. [Verify All Services](#7-verify-all-services)
+8. [Access the Web Interfaces](#8-access-the-web-interfaces)
+9. [Feature Testing Walkthrough](#9-feature-testing-walkthrough)
+10. [Enrol Wazuh Agents](#10-enrol-wazuh-agents)
+11. [Start Optional Services (Zeek / Suricata / OpenCTI / Velociraptor)](#11-start-optional-services)
+12. [Stop / Restart / Update](#12-stop--restart--update)
+13. [Troubleshooting Reference](#13-troubleshooting-reference)
 
 ---
 
@@ -126,7 +127,49 @@ All commands in this guide assume you are in this directory.
 
 ---
 
-## 5. Configure Environment
+## 5. Setup & Start
+
+### Option 1 — Automated script (recommended)
+
+The setup script handles everything interactively: it asks for your server IP, network interface, LLM model, and passwords (or auto-generates them), writes `.env`, builds images, and starts the stack in one shot.
+
+```bash
+# Make the script executable (once)
+chmod +x setup.sh
+
+# Run it
+./setup.sh
+```
+
+The wizard asks only what it needs:
+
+| Question | Default | Notes |
+|---|---|---|
+| Server IP or hostname | Auto-detected LAN IP | For agent enrollment URLs |
+| Network interface | First active interface | Zeek / Suricata packet capture |
+| LLM model (menu 1–4) | `llama3.2:3b` (2 GB) | Select by number |
+| OpenCTI admin email | `admin@soc.local` | |
+| Auto-generate passwords? | `y` | If `n`, prompts for each |
+
+All passwords, JWT secret, and the OpenCTI UUID token are generated and written to `.env` automatically. A `credentials.txt` summary is saved in the same directory.
+
+**Subsequent runs** — the wizard is skipped if `.env` already exists. Common management commands:
+
+```bash
+./setup.sh stop
+./setup.sh restart
+./setup.sh status
+./setup.sh logs [service]
+./setup.sh reconfigure   # re-run the wizard
+```
+
+---
+
+### Option 2 — Manual setup
+
+Use this if you prefer to edit `.env` by hand and control exactly which containers start.
+
+#### 5a. Configure environment
 
 ```bash
 # Copy the example env file
@@ -170,7 +213,7 @@ OPENCTI_MINIO_PASS=ChangeThisMinio1!
 VELOCIRAPTOR_ADMIN_PASSWORD=ChangeThisVelo1!
 
 # LLM — pinned model, <6 GB on disk
-OLLAMA_MODEL=qwen2.5:7b-instruct-q4_K_M
+OLLAMA_MODEL=llama3.2:3b
 
 # Network
 SERVER_IP=192.168.1.105
@@ -179,18 +222,12 @@ SOC_NETWORK_INTERFACE=ens33
 
 > **`SERVER_IP`** — the VM's bridged LAN IP. Pre-fills enrollment commands in **Agents → Add Agent** automatically.
 
-> **`OLLAMA_MODEL`** — pinned to `qwen2.5:7b-instruct-q4_K_M` (~4.4 GB disk, ~5 GB RAM). Do not change to a larger model on 16 GB RAM.
-
 > **`OPENCTI_ADMIN_TOKEN`** must be a valid UUID. Generate one:
 > ```bash
 > python3 -c "import uuid; print(uuid.uuid4())"
 > ```
 
----
-
-## 6. Start the Stack
-
-### Core services (always start these first)
+#### 5b. Start the stack
 
 ```bash
 docker compose --env-file .env up -d \
@@ -223,12 +260,12 @@ soc-wazuh-manager      Up
 
 ---
 
-## 7. First-Run Initialization (Required Once)
+## 6. First-Run Initialization (Required Once)
 
 > **This step is required exactly once** — after the first `docker compose up`.  
-> On subsequent restarts, skip to Section 8.
+> On subsequent restarts, skip to Section 7.
 
-### 7a. Initialize the OpenSearch Security Index
+### 6a. Initialize the OpenSearch Security Index
 
 ```bash
 docker exec -u root soc-wazuh-indexer bash -c '
@@ -256,7 +293,7 @@ ERR: Seems you use a node certificate which is also an admin certificate
 Done with success
 ```
 
-### 7b. Set the Wazuh Admin Password
+### 6b. Set the Wazuh Admin Password
 
 ```bash
 # Step 1 — generate a bcrypt hash of your WAZUH_API_PASSWORD
@@ -290,14 +327,14 @@ docker exec -u root soc-wazuh-indexer bash -c '
 
 Expected: `SUCC: Configuration for 'internalusers' created or updated` then `Done with success`.
 
-### 7c. Restart Dependent Services
+### 6c. Restart Dependent Services
 
 ```bash
 docker compose --env-file .env restart wazuh-manager wazuh-dashboard soc-portal
 sleep 30
 ```
 
-### 7d. Pull the LLM Model (runs once, ~5 min)
+### 6d. Pull the LLM Model (runs once, ~5 min)
 
 The stack uses a **pinned model** (`qwen2.5:7b-instruct-q4_K_M`, ~4.4 GB) and a **pinned Ollama image** (`0.4.7`) so disk usage stays fixed and nothing grows on restart.
 
@@ -309,7 +346,7 @@ docker logs soc-ollama-init -f
 
 ---
 
-## 8. Verify All Services
+## 7. Verify All Services
 
 > Run these commands **on the VM itself** using `localhost`, or from any machine on the LAN using the VM's IP.
 
@@ -370,7 +407,7 @@ curl -sk -H "Authorization: Bearer YOUR_TOKEN" $BASE/api/stats
 
 ---
 
-## 9. Access the Web Interfaces
+## 8. Access the Web Interfaces
 
 Use the **VM's bridged IP** from other machines on the LAN, or `localhost` from inside the VM.
 
@@ -389,7 +426,7 @@ Use the **VM's bridged IP** from other machines on the LAN, or `localhost` from 
 
 ---
 
-## 10. Feature Testing Walkthrough
+## 9. Feature Testing Walkthrough
 
 ### 10.1 Dashboard
 
@@ -453,7 +490,7 @@ Use the **VM's bridged IP** from other machines on the LAN, or `localhost` from 
 
 ---
 
-## 11. Enrol Wazuh Agents
+## 10. Enrol Wazuh Agents
 
 > Use `SERVER_IP` from your `.env` (the VM's bridged IP) as the manager address — not `127.0.0.1`.
 
@@ -492,7 +529,7 @@ docker exec soc-wazuh-manager /var/ossec/bin/agent_control -l
 
 ---
 
-## 12. Start Optional Services
+## 11. Start Optional Services
 
 > Start these after the core stack is stable. They are resource-intensive — start only what you need.
 
@@ -571,7 +608,7 @@ To enrol an endpoint, download the client from the Velociraptor UI → **Clients
 
 ---
 
-## 13. Stop / Restart / Update
+## 12. Stop / Restart / Update
 
 ### Stop all containers (preserves all data)
 
@@ -638,7 +675,7 @@ sudo systemctl start soc-portal
 
 ---
 
-## 14. Troubleshooting Reference
+## 13. Troubleshooting Reference
 
 ### "All services show Up but nothing works"
 
@@ -682,7 +719,7 @@ If `docker compose ps` shows `soc-wazuh-indexer` as `Up (healthy)` but the Stats
 docker logs soc-wazuh-manager --tail 20
 docker logs soc-portal --tail 20
 
-# Fix: run the first-run security init (Section 7a and 7b)
+# Fix: run the first-run security init (Section 6a and 6b)
 docker exec -u root soc-wazuh-indexer bash -c '
   export JAVA_HOME=/usr/share/wazuh-indexer/jdk
   /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
@@ -826,7 +863,7 @@ docker logs soc-opencti
 | `soc-wazuh-indexer` or `soc-opencti-elasticsearch` OOM killed | `vm.max_map_count` too low | `sudo sysctl -w vm.max_map_count=262144` (see Section 2) |
 | `soc-portal` exits with `SQLITE_CANTOPEN` | `/app/data` not writable | `docker compose build soc-portal` |
 | `soc-nginx` exits with `host not found in upstream` | Upstream container not running | Start the missing container first |
-| Stats API returns `"Unauthorized"` | OpenSearch security index not initialized | Run Section 7a then 7b |
+| Stats API returns `"Unauthorized"` | OpenSearch security index not initialized | Run Section 6a then 6b |
 | Chat models returns `[]` | LLM model not pulled | `docker compose up -d ollama-init` and wait |
 | Wazuh Dashboard blank | Missing cert or env var | `docker logs soc-wazuh-dashboard` |
 | `wazuh-manager` port 55000 not listening | Config error | `docker logs soc-wazuh-manager` |
@@ -871,7 +908,7 @@ docker compose --env-file .env up -d \
   grafana prometheus node-exporter \
   ollama soc-portal nginx
 
-# Wait 3–5 min, then run Section 7 (first-run initialization) again
+# Wait 3–5 min, then run Section 6 (first-run initialization) again
 ```
 
 ### Firewall — allow access from other machines

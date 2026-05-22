@@ -208,6 +208,17 @@ run_wizard() {
   ok "Using interface: $NET_IFACE"
   blank
 
+  # ── Packet capture ─────────────────────────────────────────────
+  heading "Packet capture (Zeek / Suricata IDS)"
+  warn "Requires Linux with network_mode: host"
+  warn "NOT supported on Docker Desktop (Windows/Mac)"
+  blank
+  confirm "Enable Zeek and Suricata for packet capture?"
+  local ENABLE_IDS
+  if [ $? -eq 0 ]; then ENABLE_IDS="true"; else ENABLE_IDS="false"; fi
+  ok "Packet capture: $ENABLE_IDS"
+  blank
+
   # ── LLM model ──────────────────────────────────────────────────────
   heading "LLM model (for AI-assisted threat analysis)"
   echo -e "    ${CYAN}1${RESET}) llama3.2:3b   — 2 GB RAM  ${GREEN}[recommended]${RESET}"
@@ -338,6 +349,9 @@ OLLAMA_MODEL=${LLM_MODEL}
 # ── Network ───────────────────────────────────────────────────
 SOC_NETWORK_INTERFACE=${NET_IFACE}
 SERVER_IP=${SERVER_IP}
+
+# ── Packet capture ────────────────────────────────────────────
+ENABLE_PACKET_CAPTURE=${ENABLE_IDS}
 EOF
 
   ok ".env written"
@@ -423,7 +437,19 @@ cmd_start() {
   info "First run may take 10–20 minutes (image downloads + LLM model pull)."
   blank
 
+  local ids_enabled
+  ids_enabled=$(grep '^ENABLE_PACKET_CAPTURE=' .env 2>/dev/null | cut -d= -f2 || echo "false")
+
   $COMPOSE up -d --build
+
+  if [ "$ids_enabled" = "true" ]; then
+    local ids_iface
+    ids_iface=$(grep '^SOC_NETWORK_INTERFACE=' .env 2>/dev/null | cut -d= -f2 || echo "eth0")
+    info "Packet capture (Zeek/Suricata) active on interface: $ids_iface"
+  else
+    $COMPOSE stop zeek suricata 2>/dev/null || true
+    info "Packet capture (Zeek/Suricata) skipped — use: ./setup.sh packet-capture start"
+  fi
 
   heading "Waiting for core services"
   wait_healthy "soc-wazuh-indexer" 150
@@ -454,6 +480,77 @@ cmd_start() {
   blank
   info "Monitor: ${CYAN}./setup.sh logs${RESET}"
   info "Status:  ${CYAN}./setup.sh status${RESET}"
+}
+
+cmd_packet_capture() {
+  local sub="${1:-status}"
+  case "$sub" in
+    start)
+      local iface="${2:-}"
+      if [ -n "$iface" ]; then
+        sed -i "s/^SOC_NETWORK_INTERFACE=.*/SOC_NETWORK_INTERFACE=${iface}/" .env
+        ok "Interface set to: $iface"
+      fi
+      if grep -q '^ENABLE_PACKET_CAPTURE=' .env 2>/dev/null; then
+        sed -i "s/^ENABLE_PACKET_CAPTURE=.*/ENABLE_PACKET_CAPTURE=true/" .env
+      else
+        echo "ENABLE_PACKET_CAPTURE=true" >> .env
+      fi
+      info "Starting Zeek and Suricata..."
+      $COMPOSE up -d zeek suricata
+      ok "Packet capture running"
+      ;;
+    stop)
+      if grep -q '^ENABLE_PACKET_CAPTURE=' .env 2>/dev/null; then
+        sed -i "s/^ENABLE_PACKET_CAPTURE=.*/ENABLE_PACKET_CAPTURE=false/" .env
+      fi
+      $COMPOSE stop zeek suricata
+      ok "Packet capture stopped"
+      ;;
+    interface)
+      local new_iface="${2:-}"
+      if [ -z "$new_iface" ]; then
+        blank
+        local ifaces iface_list=()
+        ifaces=$(detect_interfaces)
+        local i=1
+        echo -e "  Available interfaces:"
+        while IFS= read -r iline; do
+          [ -z "$iline" ] && continue
+          echo -e "    ${CYAN}$i${RESET}) $iline"
+          iface_list+=("$iline")
+          ((i++)) || true
+        done <<< "$ifaces"
+        blank
+        local first_iface="${iface_list[0]:-eth0}"
+        ask "Interface name or number" "$first_iface"
+        new_iface="$_INPUT"
+        if [[ "$new_iface" =~ ^[0-9]+$ ]]; then
+          local idx=$(( new_iface - 1 ))
+          new_iface="${iface_list[$idx]:-$first_iface}"
+        fi
+      fi
+      sed -i "s/^SOC_NETWORK_INTERFACE=.*/SOC_NETWORK_INTERFACE=${new_iface}/" .env
+      ok "Interface set to: $new_iface"
+      warn "Restarting Zeek and Suricata to apply..."
+      $COMPOSE stop zeek suricata 2>/dev/null || true
+      $COMPOSE up -d zeek suricata
+      ok "Packet capture restarted on: $new_iface"
+      ;;
+    status)
+      blank
+      echo -e "  ${BOLD}Packet capture status:${RESET}"
+      local enabled iface
+      enabled=$(grep '^ENABLE_PACKET_CAPTURE=' .env 2>/dev/null | cut -d= -f2 || echo "false")
+      iface=$(grep '^SOC_NETWORK_INTERFACE=' .env 2>/dev/null | cut -d= -f2 || echo "eth0")
+      info "Enabled: $enabled  |  Interface: $iface"
+      blank
+      $COMPOSE ps zeek suricata
+      ;;
+    *)
+      err "Usage: ./setup.sh packet-capture [start [iface] | stop | interface [iface] | status]"
+      ;;
+  esac
 }
 
 cmd_stop() {
@@ -546,11 +643,15 @@ usage() {
   echo -e "    ${BOLD}stop${RESET}               Stop all containers"
   echo -e "    ${BOLD}restart${RESET}            Restart all containers"
   echo -e "    ${BOLD}status${RESET}             Show container status"
-  echo -e "    ${BOLD}logs${RESET} [service]     Stream logs (all, or a specific service)"
-  echo -e "    ${BOLD}pull-model${RESET} [name]  Download a different Ollama LLM model"
-  echo -e "    ${BOLD}update${RESET}             Pull latest Docker images and rebuild"
-  echo -e "    ${BOLD}backup${RESET}             Archive configs + .env to a .tar.gz"
-  echo -e "    ${BOLD}reconfigure${RESET}        Re-run the setup wizard"
+  echo -e "    ${BOLD}logs${RESET} [service]                 Stream logs (all, or a specific service)"
+  echo -e "    ${BOLD}pull-model${RESET} [name]              Download a different Ollama LLM model"
+  echo -e "    ${BOLD}update${RESET}                         Pull latest Docker images and rebuild"
+  echo -e "    ${BOLD}backup${RESET}                         Archive configs + .env to a .tar.gz"
+  echo -e "    ${BOLD}reconfigure${RESET}                    Re-run the setup wizard"
+  echo -e "    ${BOLD}packet-capture start${RESET} [iface]   Enable Zeek+Suricata (Linux only)"
+  echo -e "    ${BOLD}packet-capture stop${RESET}             Disable Zeek+Suricata"
+  echo -e "    ${BOLD}packet-capture interface${RESET} [if]   Change listening interface"
+  echo -e "    ${BOLD}packet-capture status${RESET}           Show IDS container status"
   blank
   echo -e "  ${DIM}Example service names for logs:${RESET}"
   echo -e "    soc-portal  soc-wazuh-manager  soc-wazuh-indexer"
@@ -571,8 +672,9 @@ case "$CMD" in
   pull-model)   cmd_pull_model "" "$@" ;;
   update)       cmd_update ;;
   backup)       cmd_backup ;;
-  reconfigure)  cmd_reconfigure ;;
-  help|--help|-h) usage ;;
+  reconfigure)      cmd_reconfigure ;;
+  packet-capture)   cmd_packet_capture "$@" ;;
+  help|--help|-h)   usage ;;
   *)
     err "Unknown command: $CMD"
     usage
