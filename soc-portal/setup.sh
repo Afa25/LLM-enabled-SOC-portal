@@ -238,6 +238,18 @@ run_wizard() {
   ok "LLM model: $LLM_MODEL"
   blank
 
+  # ── Optional heavy services ────────────────────────────────────────
+  heading "Optional services (OpenCTI + Velociraptor)"
+  info "OpenCTI is a threat-intelligence platform (~3 GB RAM)"
+  info "Velociraptor is a DFIR endpoint-visibility tool (~256 MB RAM)"
+  warn "Combined: ~3.3 GB extra RAM. Disable on low-memory servers."
+  blank
+  confirm "Enable OpenCTI and Velociraptor?"
+  local ENABLE_FULL
+  if [ $? -eq 0 ]; then ENABLE_FULL="full"; else ENABLE_FULL=""; fi
+  ok "Optional services: ${ENABLE_FULL:-disabled}"
+  blank
+
   # ── OpenCTI email ──────────────────────────────────────────────────
   heading "OpenCTI admin account"
   ask "Admin email" "admin@soc.local"
@@ -352,6 +364,11 @@ SERVER_IP=${SERVER_IP}
 
 # ── Packet capture ────────────────────────────────────────────
 ENABLE_PACKET_CAPTURE=${ENABLE_IDS}
+
+# ── Optional services (OpenCTI + Velociraptor) ────────────────
+# Set to 'full' to enable; leave empty to run core services only
+# Saves ~3.3 GB RAM when disabled
+COMPOSE_PROFILES=${ENABLE_FULL}
 EOF
 
   ok ".env written"
@@ -787,6 +804,43 @@ cmd_reset_password() {
   fi
 }
 
+cmd_optional_services() {
+  local sub="${1:-status}"
+  case "$sub" in
+    enable)
+      if grep -q '^COMPOSE_PROFILES=' .env 2>/dev/null; then
+        sed -i "s/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=full/" .env
+      else
+        echo "COMPOSE_PROFILES=full" >> .env
+      fi
+      ok "Optional services enabled (OpenCTI + Velociraptor)"
+      info "Run: ${CYAN}./setup.sh start${RESET} to bring them up"
+      ;;
+    disable)
+      if grep -q '^COMPOSE_PROFILES=' .env 2>/dev/null; then
+        sed -i "s/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=/" .env
+      fi
+      $COMPOSE stop opencti opencti-redis opencti-rabbitmq opencti-minio opencti-elasticsearch velociraptor 2>/dev/null || true
+      ok "Optional services stopped and disabled"
+      info "~3.3 GB RAM freed on next restart"
+      ;;
+    status)
+      local prof
+      prof=$(grep '^COMPOSE_PROFILES=' .env 2>/dev/null | cut -d= -f2 || echo "")
+      if [ "$prof" = "full" ]; then
+        ok "Optional services: ENABLED (OpenCTI + Velociraptor)"
+      else
+        info "Optional services: disabled — run: ${CYAN}./setup.sh optional-services enable${RESET}"
+      fi
+      blank
+      $COMPOSE ps opencti velociraptor 2>/dev/null || true
+      ;;
+    *)
+      err "Usage: ./setup.sh optional-services [enable | disable | status]"
+      ;;
+  esac
+}
+
 cmd_reconfigure() {
   warn "This will delete .env and re-run the wizard."
   blank
@@ -816,10 +870,13 @@ usage() {
   echo -e "    ${BOLD}reset-password${RESET}                 Re-apply portal login password from .env"
   echo -e "    ${BOLD}disk-usage${RESET}                     Show host and Docker volume disk usage"
   echo -e "    ${BOLD}export-data${RESET} [days]             Compress + export logs older than N days"
-  echo -e "    ${BOLD}packet-capture start${RESET} [iface]   Enable Zeek+Suricata (Linux only)"
-  echo -e "    ${BOLD}packet-capture stop${RESET}             Disable Zeek+Suricata"
-  echo -e "    ${BOLD}packet-capture interface${RESET} [if]   Change listening interface"
-  echo -e "    ${BOLD}packet-capture status${RESET}           Show IDS container status"
+  echo -e "    ${BOLD}packet-capture start${RESET} [iface]        Enable Zeek+Suricata (Linux only)"
+  echo -e "    ${BOLD}packet-capture stop${RESET}                Disable Zeek+Suricata"
+  echo -e "    ${BOLD}packet-capture interface${RESET} [if]       Change listening interface"
+  echo -e "    ${BOLD}packet-capture status${RESET}               Show IDS container status"
+  echo -e "    ${BOLD}optional-services enable${RESET}            Start OpenCTI + Velociraptor (+3.3 GB RAM)"
+  echo -e "    ${BOLD}optional-services disable${RESET}           Stop OpenCTI + Velociraptor (free RAM)"
+  echo -e "    ${BOLD}optional-services status${RESET}            Show optional service state"
   blank
   echo -e "  ${DIM}Example service names for logs:${RESET}"
   echo -e "    soc-portal  soc-wazuh-manager  soc-wazuh-indexer"
@@ -844,7 +901,8 @@ case "$CMD" in
   reset-password)   cmd_reset_password ;;
   disk-usage)       cmd_disk_usage ;;
   export-data)      cmd_export_data "$@" ;;
-  packet-capture)   cmd_packet_capture "$@" ;;
+  packet-capture)     cmd_packet_capture "$@" ;;
+  optional-services)  cmd_optional_services "$@" ;;
   help|--help|-h)   usage ;;
   *)
     err "Unknown command: $CMD"

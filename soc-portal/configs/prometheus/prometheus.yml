@@ -11,10 +11,10 @@ scrape_configs:
     static_configs:
       - targets: ['host.docker.internal:9100']
 
-  - job_name: 'soc-portal'
+  - job_name: 'soc-ids'
     static_configs:
       - targets: ['soc-portal:4000']
-    metrics_path: /api/health
+    metrics_path: /api/netdata/ids-metrics
 
   - job_name: 'grafana'
     static_configs:

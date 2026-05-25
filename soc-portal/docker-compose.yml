@@ -71,8 +71,10 @@ services:
     container_name: soc-wazuh-indexer
     restart: unless-stopped
     hostname: wazuh-indexer
+    mem_limit: 768m
+    memswap_limit: 768m
     environment:
-      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx1g -XX:MaxDirectMemorySize=512m"
+      - "OPENSEARCH_JAVA_OPTS=-Xms256m -Xmx512m -XX:MaxDirectMemorySize=256m"
       - bootstrap.memory_lock=true
     ulimits:
       memlock: { soft: -1, hard: -1 }
@@ -101,6 +103,8 @@ services:
     container_name: soc-wazuh-manager
     restart: unless-stopped
     hostname: wazuh-manager
+    mem_limit: 512m
+    memswap_limit: 512m
     environment:
       - INDEXER_URL=https://wazuh-indexer:9200
       - INDEXER_USERNAME=admin
@@ -140,6 +144,8 @@ services:
     container_name: soc-wazuh-dashboard
     restart: unless-stopped
     hostname: wazuh-dashboard
+    mem_limit: 512m
+    memswap_limit: 512m
     environment:
       - INDEXER_USERNAME=admin
       - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD}
@@ -166,6 +172,8 @@ services:
     image: grafana/grafana-oss:10.4.2
     container_name: soc-grafana
     restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
@@ -204,10 +212,12 @@ services:
     image: prom/prometheus:v2.51.2
     container_name: soc-prometheus
     restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.time=15d'
       - '--web.enable-lifecycle'
       - '--web.external-url=/prometheus/'
       - '--web.route-prefix=/'
@@ -228,6 +238,8 @@ services:
     image: prom/node-exporter:v1.7.0
     container_name: soc-node-exporter
     restart: unless-stopped
+    mem_limit: 64m
+    memswap_limit: 64m
     network_mode: host
     pid: host
     volumes:
@@ -248,6 +260,8 @@ services:
     image: zeek/zeek:latest
     container_name: soc-zeek
     restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
     network_mode: host
     cap_add:
       - NET_RAW
@@ -266,6 +280,8 @@ services:
     image: jasonish/suricata:latest
     container_name: soc-suricata
     restart: unless-stopped
+    mem_limit: 384m
+    memswap_limit: 384m
     network_mode: host
     cap_add:
       - NET_RAW
@@ -283,6 +299,12 @@ services:
     image: ollama/ollama:0.4.7
     container_name: soc-ollama
     restart: unless-stopped
+    mem_limit: 6g
+    memswap_limit: 6g
+    environment:
+      - OLLAMA_KEEP_ALIVE=5m
+      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_NUM_PARALLEL=1
     volumes:
       - ollama-models:/root/.ollama
     networks:
@@ -328,6 +350,8 @@ services:
       dockerfile: Dockerfile
     container_name: soc-portal
     restart: unless-stopped
+    mem_limit: 384m
+    memswap_limit: 384m
     environment:
       - NODE_ENV=production
       - PORT=4000
@@ -390,6 +414,8 @@ services:
     image: nginx:1.25-alpine
     container_name: soc-nginx
     restart: unless-stopped
+    mem_limit: 64m
+    memswap_limit: 64m
     ports:
       - "80:80"
       - "443:443"
@@ -420,6 +446,8 @@ services:
     image: alpine
     container_name: soc-portal-backup
     restart: unless-stopped
+    mem_limit: 32m
+    memswap_limit: 32m
     volumes:
       - portal-db:/data:ro
       - portal-backups:/backups
@@ -460,12 +488,47 @@ services:
       "
 
   # ────────────────────────────────────────────────────────────────
-  # OPENCTI DEPENDENCIES
+  # LOG CLEANER — daily compression + rotation of IDS/proxy/SIEM logs
+  # Strategy: compress logs > 1 day old (saves 70-90% disk), delete > 30 days
+  # Active files (eve.json, current/ zeek logs) have recent mtime — not touched
+  # ────────────────────────────────────────────────────────────────
+  log-cleaner:
+    image: alpine
+    container_name: soc-log-cleaner
+    restart: unless-stopped
+    mem_limit: 32m
+    memswap_limit: 32m
+    volumes:
+      - zeek-logs:/data/zeek
+      - suricata-logs:/data/suricata
+      - nginx-logs:/data/nginx
+      - wazuh-logs:/data/wazuh
+    command: >
+      sh -c "while true; do
+        echo \"[log-cleaner] Compress+rotate at $$(date)\";
+        find /data/zeek     -type f -name '*.log'  -mtime +1 -not -name '*.gz' -exec gzip -9 {} \; 2>/dev/null;
+        find /data/suricata -type f -name '*.log'  -mtime +1 -not -name '*.gz' -exec gzip -9 {} \; 2>/dev/null;
+        find /data/suricata -type f -name '*.json' -mtime +1 -not -name 'eve.json' -not -name '*.gz' -exec gzip -9 {} \; 2>/dev/null;
+        find /data/nginx    -type f -name '*.log'  -mtime +1 -not -name '*.gz' -exec gzip -9 {} \; 2>/dev/null;
+        find /data/zeek     -type f -name '*.gz'   -mtime +30 -delete 2>/dev/null;
+        find /data/suricata -type f -name '*.gz'   -mtime +30 -delete 2>/dev/null;
+        find /data/nginx    -type f -name '*.gz'   -mtime +30 -delete 2>/dev/null;
+        find /data/wazuh    -type f -name '*.log'  -mtime +30 -delete 2>/dev/null;
+        echo \"[log-cleaner] Done\";
+        sleep 86400;
+      done"
+
+  # ────────────────────────────────────────────────────────────────
+  # OPENCTI DEPENDENCIES  (profile: full — not started by default)
+  # Enable: add COMPOSE_PROFILES=full to .env, then ./setup.sh start
   # ────────────────────────────────────────────────────────────────
   opencti-redis:
     image: redis:7.2-alpine
     container_name: soc-opencti-redis
     restart: unless-stopped
+    mem_limit: 128m
+    memswap_limit: 128m
+    profiles: [full]
     volumes:
       - opencti-redis-data:/data
     networks:
@@ -476,6 +539,9 @@ services:
     image: rabbitmq:3.12-management-alpine
     container_name: soc-opencti-rabbitmq
     restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
+    profiles: [full]
     environment:
       - RABBITMQ_DEFAULT_USER=${OPENCTI_RABBITMQ_USER:-opencti}
       - RABBITMQ_DEFAULT_PASS=${OPENCTI_RABBITMQ_PASS:-opencti}
@@ -489,6 +555,9 @@ services:
     image: minio/minio:RELEASE.2024-01-16T16-07-38Z
     container_name: soc-opencti-minio
     restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
+    profiles: [full]
     command: server /data
     environment:
       - MINIO_ROOT_USER=${OPENCTI_MINIO_USER:-opencti}
@@ -503,10 +572,13 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
     container_name: soc-opencti-elasticsearch
     restart: unless-stopped
+    mem_limit: 640m
+    memswap_limit: 640m
+    profiles: [full]
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "ES_JAVA_OPTS=-Xms256m -Xmx512m"
     ulimits:
       memlock: { soft: -1, hard: -1 }
       nofile:  { soft: 65536, hard: 65536 }
@@ -517,14 +589,17 @@ services:
         ipv4_address: 172.20.0.34
 
   # ────────────────────────────────────────────────────────────────
-  # OPENCTI (threat intelligence platform)
+  # OPENCTI (threat intelligence platform)  (profile: full)
   # ────────────────────────────────────────────────────────────────
   opencti:
     image: opencti/platform:6.1.2
     container_name: soc-opencti
     restart: unless-stopped
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    profiles: [full]
     environment:
-      - NODE_OPTIONS=--max-old-space-size=4096
+      - NODE_OPTIONS=--max-old-space-size=1024
       - APP__PORT=8080
       - APP__BASE_PATH=/opencti
       - APP__BASE_URL=http://opencti:8080/opencti
@@ -554,7 +629,7 @@ services:
       - opencti-elasticsearch
 
   # ────────────────────────────────────────────────────────────────
-  # VELOCIRAPTOR (endpoint visibility & DFIR)
+  # VELOCIRAPTOR (endpoint visibility & DFIR)  (profile: full)
   # GUI: https://<server-ip>:8889  (direct, own TLS — not proxied)
   # Agent enrollment port: 8001
   # ────────────────────────────────────────────────────────────────
@@ -564,6 +639,9 @@ services:
       dockerfile: Dockerfile
     container_name: soc-velociraptor
     restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
+    profiles: [full]
     environment:
       - VEL_USER=admin
       - VEL_PASSWORD=${VELOCIRAPTOR_ADMIN_PASSWORD:-ChangeThisVelo1!}

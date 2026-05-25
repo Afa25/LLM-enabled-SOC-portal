@@ -65,8 +65,8 @@ const SURI_SEVERITY = { 1: { label: 'Critical', color: 'text-red-400' }, 2: { la
 
 export default function Dashboard() {
   const { apiFetch } = useAuth();
-  const [ps, setPs] = usePageState('dashboard', { stats: null, hours: 24, health: [], promData: null, suriData: null, zeekData: null });
-  const { stats, hours, health, promData, suriData, zeekData } = ps;
+  const [ps, setPs] = usePageState('dashboard', { stats: null, hours: 24, health: [], promData: null, suriData: null, zeekData: null, idsStats: null });
+  const { stats, hours, health, promData, suriData, zeekData, idsStats } = ps;
   const [loading,    setLoading]    = useState(!ps.stats);
   const [netLoading, setNetLoading] = useState(!ps.promData);
 
@@ -76,6 +76,7 @@ export default function Dashboard() {
   const setPromData = v => setPs(p => ({ ...p, promData: typeof v === 'function' ? v(p.promData) : v }));
   const setSuriData = v => setPs(p => ({ ...p, suriData: typeof v === 'function' ? v(p.suriData) : v }));
   const setZeekData = v => setPs(p => ({ ...p, zeekData: typeof v === 'function' ? v(p.zeekData) : v }));
+  const setIdsStats = v => setPs(p => ({ ...p, idsStats: typeof v === 'function' ? v(p.idsStats) : v }));
 
   async function load() {
     setLoading(true);
@@ -92,14 +93,16 @@ export default function Dashboard() {
 
   async function loadNetdata() {
     setNetLoading(true);
-    const [pr, sr, zr] = await Promise.all([
+    const [pr, sr, zr, ids] = await Promise.all([
       apiFetch('/api/netdata/prometheus'),
       apiFetch('/api/netdata/suricata'),
       apiFetch('/api/netdata/zeek'),
+      apiFetch('/api/netdata/ids-stats'),
     ]);
     setPromData(await pr?.json());
     setSuriData(await sr?.json());
     setZeekData(await zr?.json());
+    setIdsStats(await ids?.json());
     setNetLoading(false);
   }
 
@@ -287,8 +290,11 @@ export default function Dashboard() {
             <h3 className="text-white font-semibold">Suricata IDS Alerts</h3>
             <span className="text-xs text-gray-600 ml-1">live from eve.json</span>
           </div>
-          {suriData && (
-            <span className="text-xs text-gray-500">{suriData.alerts?.length ?? 0} recent</span>
+          {suriData?.available && (
+            <a href="/grafana/d/soc-ids-dashboard" target="_blank" rel="noopener noreferrer"
+               className="text-xs text-yellow-500 hover:text-yellow-400 transition-colors">
+              Grafana dashboard →
+            </a>
           )}
         </div>
 
@@ -298,40 +304,90 @@ export default function Dashboard() {
           <div className="text-center py-8">
             <AlertOctagon size={28} className="text-gray-700 mx-auto mb-2" />
             <p className="text-gray-600 text-sm">Suricata log not found.</p>
-            <p className="text-gray-700 text-xs mt-1">Suricata requires a Linux host with network_mode: host.</p>
+            <p className="text-gray-700 text-xs mt-1">Requires Linux host · enable with: ./setup.sh packet-capture start</p>
           </div>
-        ) : suriData.alerts.length === 0 ? (
-          <p className="text-gray-600 text-sm text-center py-6">No alerts in current log.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-gray-500 border-b border-gray-800">
-                  <th className="text-left py-2 pr-4 font-medium">Time</th>
-                  <th className="text-left py-2 pr-4 font-medium">Src</th>
-                  <th className="text-left py-2 pr-4 font-medium">Dest</th>
-                  <th className="text-left py-2 pr-4 font-medium">Signature</th>
-                  <th className="text-left py-2 font-medium">Sev</th>
-                </tr>
-              </thead>
-              <tbody>
-                {suriData.alerts.slice(0, 15).map((a, i) => {
-                  const sev = SURI_SEVERITY[a.severity] || { label: `${a.severity}`, color: 'text-gray-400' };
-                  return (
-                    <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                      <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">
-                        {a.timestamp ? new Date(a.timestamp).toLocaleTimeString() : '—'}
-                      </td>
-                      <td className="py-2 pr-4 text-gray-300 font-mono">{a.src_ip ?? '—'}</td>
-                      <td className="py-2 pr-4 text-gray-300 font-mono">{a.dest_ip ?? '—'}</td>
-                      <td className="py-2 pr-4 text-gray-200 max-w-xs truncate">{a.signature ?? '—'}</td>
-                      <td className={`py-2 font-medium ${sev.color}`}>{sev.label}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Summary stat strip */}
+            {idsStats?.suricata?.available && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                {[
+                  { label: 'Total', value: idsStats.suricata.total, color: 'text-white' },
+                  { label: 'Critical', value: idsStats.suricata.by_severity?.[1] ?? 0, color: 'text-red-400' },
+                  { label: 'High',     value: idsStats.suricata.by_severity?.[2] ?? 0, color: 'text-orange-400' },
+                  { label: 'Medium',   value: idsStats.suricata.by_severity?.[3] ?? 0, color: 'text-yellow-400' },
+                ].map(s => (
+                  <div key={s.label} className="bg-gray-800/60 rounded-lg p-3 text-center">
+                    <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="grid lg:grid-cols-3 gap-4">
+              {/* Top categories */}
+              {idsStats?.suricata?.top_categories?.length > 0 && (
+                <div className="lg:col-span-1">
+                  <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">Top Categories</p>
+                  <div className="space-y-1.5">
+                    {idsStats.suricata.top_categories.slice(0, 5).map((c, i) => {
+                      const max = idsStats.suricata.top_categories[0].count;
+                      const pct = Math.round((c.count / max) * 100);
+                      return (
+                        <div key={i}>
+                          <div className="flex justify-between text-xs mb-0.5">
+                            <span className="text-gray-400 truncate max-w-[160px]">{c.cat}</span>
+                            <span className="text-gray-300 ml-2 flex-shrink-0">{c.count}</span>
+                          </div>
+                          <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full bg-yellow-500/60" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Alerts table */}
+              <div className={idsStats?.suricata?.top_categories?.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'}>
+                {suriData.alerts.length === 0 ? (
+                  <p className="text-gray-600 text-sm text-center py-6">No alerts in current log window.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-500 border-b border-gray-800">
+                          <th className="text-left py-2 pr-3 font-medium">Time</th>
+                          <th className="text-left py-2 pr-3 font-medium">Src</th>
+                          <th className="text-left py-2 pr-3 font-medium">Dest</th>
+                          <th className="text-left py-2 pr-3 font-medium">Signature</th>
+                          <th className="text-left py-2 font-medium">Sev</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {suriData.alerts.slice(0, 12).map((a, i) => {
+                          const sev = SURI_SEVERITY[a.severity] || { label: `${a.severity}`, color: 'text-gray-400' };
+                          return (
+                            <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                              <td className="py-1.5 pr-3 text-gray-500 whitespace-nowrap">
+                                {a.timestamp ? new Date(a.timestamp).toLocaleTimeString() : '—'}
+                              </td>
+                              <td className="py-1.5 pr-3 text-gray-300 font-mono">{a.src_ip ?? '—'}</td>
+                              <td className="py-1.5 pr-3 text-gray-300 font-mono">{a.dest_ip ?? '—'}</td>
+                              <td className="py-1.5 pr-3 text-gray-200 max-w-xs truncate">{a.signature ?? '—'}</td>
+                              <td className={`py-1.5 font-medium ${sev.color}`}>{sev.label}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
         )}
       </div>
 
@@ -343,8 +399,11 @@ export default function Dashboard() {
             <h3 className="text-white font-semibold">Zeek Network Activity</h3>
             <span className="text-xs text-gray-600 ml-1">live from conn.log</span>
           </div>
-          {zeekData && (
-            <span className="text-xs text-gray-500">{zeekData.connections?.length ?? 0} recent</span>
+          {zeekData?.available && (
+            <a href="/grafana/d/soc-ids-dashboard" target="_blank" rel="noopener noreferrer"
+               className="text-xs text-cyan-500 hover:text-cyan-400 transition-colors">
+              Grafana dashboard →
+            </a>
           )}
         </div>
 
@@ -354,41 +413,100 @@ export default function Dashboard() {
           <div className="text-center py-8">
             <Wifi size={28} className="text-gray-700 mx-auto mb-2" />
             <p className="text-gray-600 text-sm">Zeek log not found.</p>
-            <p className="text-gray-700 text-xs mt-1">Zeek requires a Linux host with network_mode: host.</p>
+            <p className="text-gray-700 text-xs mt-1">Requires Linux host · enable with: ./setup.sh packet-capture start</p>
           </div>
-        ) : zeekData.connections.length === 0 ? (
-          <p className="text-gray-600 text-sm text-center py-6">No connections in current log.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-gray-500 border-b border-gray-800">
-                  <th className="text-left py-2 pr-4 font-medium">Time</th>
-                  <th className="text-left py-2 pr-4 font-medium">Src</th>
-                  <th className="text-left py-2 pr-4 font-medium">Dest</th>
-                  <th className="text-left py-2 pr-4 font-medium">Proto</th>
-                  <th className="text-left py-2 pr-4 font-medium">Service</th>
-                  <th className="text-left py-2 pr-4 font-medium">Bytes ↓</th>
-                  <th className="text-left py-2 font-medium">Bytes ↑</th>
-                </tr>
-              </thead>
-              <tbody>
-                {zeekData.connections.slice(0, 15).map((c, i) => (
-                  <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                    <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">
-                      {c.ts ? new Date(parseFloat(c.ts) * 1000).toLocaleTimeString() : '—'}
-                    </td>
-                    <td className="py-2 pr-4 text-gray-300 font-mono">{c.src_ip}:{c.src_port}</td>
-                    <td className="py-2 pr-4 text-gray-300 font-mono">{c.dest_ip}:{c.dest_port}</td>
-                    <td className="py-2 pr-4 text-cyan-400 uppercase font-medium">{c.proto ?? '—'}</td>
-                    <td className="py-2 pr-4 text-gray-400">{c.service && c.service !== '-' ? c.service : '—'}</td>
-                    <td className="py-2 pr-4 text-gray-400">{fmtBytes(c.bytes_in)}</td>
-                    <td className="py-2 text-gray-400">{fmtBytes(c.bytes_out)}</td>
-                  </tr>
+          <>
+            {/* Summary strip */}
+            {idsStats?.zeek?.available && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                {[
+                  { label: 'Connections', value: idsStats.zeek.total },
+                  { label: 'Unique Src IPs', value: idsStats.zeek.unique_src },
+                  { label: 'Bytes In',  value: fmtBytes(idsStats.zeek.bytes_in) },
+                  { label: 'Bytes Out', value: fmtBytes(idsStats.zeek.bytes_out) },
+                ].map(s => (
+                  <div key={s.label} className="bg-gray-800/60 rounded-lg p-3 text-center">
+                    <p className="text-xl font-bold text-cyan-300">{s.value ?? '—'}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            )}
+
+            <div className="grid lg:grid-cols-3 gap-4">
+              {/* Protocol breakdown */}
+              {idsStats?.zeek?.by_proto && Object.keys(idsStats.zeek.by_proto).length > 0 && (
+                <div className="lg:col-span-1">
+                  <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">Protocols</p>
+                  <div className="space-y-1.5">
+                    {Object.entries(idsStats.zeek.by_proto)
+                      .sort((a, b) => b[1] - a[1])
+                      .slice(0, 6)
+                      .map(([proto, count], i) => {
+                        const total = Object.values(idsStats.zeek.by_proto).reduce((s, v) => s + v, 0);
+                        const pct = Math.round((count / total) * 100);
+                        const colors = ['bg-cyan-500/60', 'bg-blue-500/60', 'bg-purple-500/60', 'bg-green-500/60', 'bg-yellow-500/60', 'bg-pink-500/60'];
+                        return (
+                          <div key={proto}>
+                            <div className="flex justify-between text-xs mb-0.5">
+                              <span className="text-gray-400 uppercase font-medium">{proto}</span>
+                              <span className="text-gray-300">{count} <span className="text-gray-600">({pct}%)</span></span>
+                            </div>
+                            <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full ${colors[i % colors.length]}`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* Connections table */}
+              <div className={idsStats?.zeek?.by_proto && Object.keys(idsStats.zeek.by_proto).length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'}>
+                {zeekData.connections.length === 0 ? (
+                  <p className="text-gray-600 text-sm text-center py-6">No connections in current log window.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-500 border-b border-gray-800">
+                          <th className="text-left py-2 pr-3 font-medium">Time</th>
+                          <th className="text-left py-2 pr-3 font-medium">Src</th>
+                          <th className="text-left py-2 pr-3 font-medium">Dest</th>
+                          <th className="text-left py-2 pr-3 font-medium">Proto</th>
+                          <th className="text-left py-2 pr-3 font-medium">Service</th>
+                          <th className="text-left py-2 pr-3 font-medium">↓</th>
+                          <th className="text-left py-2 font-medium">↑</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {zeekData.connections.slice(0, 12).map((c, i) => {
+                          const ts = c.ts
+                            ? (typeof c.ts === 'number' || /^\d+(\.\d+)?$/.test(c.ts))
+                              ? new Date(parseFloat(c.ts) * 1000).toLocaleTimeString()
+                              : new Date(c.ts).toLocaleTimeString()
+                            : '—';
+                          return (
+                            <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                              <td className="py-1.5 pr-3 text-gray-500 whitespace-nowrap">{ts}</td>
+                              <td className="py-1.5 pr-3 text-gray-300 font-mono">{c.src_ip}:{c.src_port}</td>
+                              <td className="py-1.5 pr-3 text-gray-300 font-mono">{c.dest_ip}:{c.dest_port}</td>
+                              <td className="py-1.5 pr-3 text-cyan-400 uppercase font-medium">{c.proto ?? '—'}</td>
+                              <td className="py-1.5 pr-3 text-gray-400">{c.service && c.service !== '-' ? c.service : '—'}</td>
+                              <td className="py-1.5 pr-3 text-gray-400">{fmtBytes(c.bytes_in)}</td>
+                              <td className="py-1.5 text-gray-400">{fmtBytes(c.bytes_out)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
         )}
       </div>
 

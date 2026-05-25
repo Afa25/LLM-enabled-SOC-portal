@@ -1,0 +1,367 @@
+{
+  "title": "IDS Overview — Zeek & Suricata",
+  "uid": "soc-ids-dashboard",
+  "description": "Real-time network traffic analysis (Zeek) and intrusion detection alerts (Suricata)",
+  "tags": ["soc", "ids", "zeek", "suricata", "network"],
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Zeek — Network Traffic Analysis",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Connections (window)",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{ "expr": "soc_ids_zeek_connections_parsed", "refId": "A", "legendFormat": "" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area", "justifyMode": "auto",
+        "orientation": "auto", "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "blue", "value": null }
+          ]}
+        }
+      }
+    },
+
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Zeek Status",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{ "expr": "soc_ids_zeek_available", "refId": "A", "legendFormat": "" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "none", "justifyMode": "auto",
+        "orientation": "auto", "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "OFFLINE", "color": "red" }, "1": { "text": "ONLINE", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        }
+      }
+    },
+
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Bytes Inbound",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{ "expr": "soc_ids_zeek_bytes_total{direction=\"inbound\"}", "refId": "A", "legendFormat": "" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area", "justifyMode": "auto",
+        "orientation": "auto", "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "bytes",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      }
+    },
+
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Bytes Outbound",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{ "expr": "soc_ids_zeek_bytes_total{direction=\"outbound\"}", "refId": "A", "legendFormat": "" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area", "justifyMode": "auto",
+        "orientation": "auto", "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "bytes",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] }
+        }
+      }
+    },
+
+    {
+      "id": 6,
+      "type": "piechart",
+      "title": "Protocol Distribution",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{
+        "expr": "soc_ids_zeek_connections_proto",
+        "refId": "A",
+        "legendFormat": "{{proto}}",
+        "instant": true
+      }],
+      "options": {
+        "pieType": "pie",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true }
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } }
+      }
+    },
+
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Connection Count Over Time",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{
+        "expr": "soc_ids_zeek_connections_parsed",
+        "refId": "A",
+        "legendFormat": "Connections in window"
+      }],
+      "options": {
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      }
+    },
+
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Suricata — IDS Alerts",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 }
+    },
+
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Total Alerts (window)",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{ "expr": "soc_ids_suricata_alerts_parsed", "refId": "A", "legendFormat": "" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area", "justifyMode": "auto",
+        "orientation": "auto", "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 10 },
+            { "color": "orange", "value": 50 },
+            { "color": "red", "value": 200 }
+          ]}
+        }
+      }
+    },
+
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Critical Alerts",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{ "expr": "soc_ids_suricata_alerts_severity{severity=\"critical\"}", "refId": "A", "legendFormat": "" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "none", "justifyMode": "auto",
+        "orientation": "auto", "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ]}
+        }
+      }
+    },
+
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "High Alerts",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{ "expr": "soc_ids_suricata_alerts_severity{severity=\"high\"}", "refId": "A", "legendFormat": "" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "none", "justifyMode": "auto",
+        "orientation": "auto", "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 1 }
+          ]}
+        }
+      }
+    },
+
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Medium Alerts",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{ "expr": "soc_ids_suricata_alerts_severity{severity=\"medium\"}", "refId": "A", "legendFormat": "" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "none", "justifyMode": "auto",
+        "orientation": "auto", "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 }
+          ]}
+        }
+      }
+    },
+
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Suricata Status",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{ "expr": "soc_ids_suricata_available", "refId": "A", "legendFormat": "" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "none", "justifyMode": "auto",
+        "orientation": "auto", "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "OFFLINE", "color": "red" }, "1": { "text": "ONLINE", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        }
+      }
+    },
+
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Alert Rate Over Time",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [
+        { "expr": "soc_ids_suricata_alerts_severity{severity=\"critical\"}", "refId": "A", "legendFormat": "Critical" },
+        { "expr": "soc_ids_suricata_alerts_severity{severity=\"high\"}",     "refId": "B", "legendFormat": "High" },
+        { "expr": "soc_ids_suricata_alerts_severity{severity=\"medium\"}",   "refId": "C", "legendFormat": "Medium" }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 8 }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Critical" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#ef4444" } }] },
+          { "matcher": { "id": "byName", "options": "High" },     "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#f97316" } }] },
+          { "matcher": { "id": "byName", "options": "Medium" },   "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#eab308" } }] }
+        ]
+      }
+    },
+
+    {
+      "id": 17,
+      "type": "piechart",
+      "title": "Alert Severity Distribution",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{
+        "expr": "soc_ids_suricata_alerts_severity",
+        "refId": "A",
+        "legendFormat": "{{severity}}",
+        "instant": true
+      }],
+      "options": {
+        "pieType": "donut",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true }
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "critical" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#ef4444" } }] },
+          { "matcher": { "id": "byName", "options": "high" },     "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#f97316" } }] },
+          { "matcher": { "id": "byName", "options": "medium" },   "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#eab308" } }] }
+        ]
+      }
+    },
+
+    {
+      "id": 18,
+      "type": "barchart",
+      "title": "Top Alert Categories",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-main" },
+      "targets": [{
+        "expr": "topk(8, soc_ids_suricata_alerts_category)",
+        "refId": "A",
+        "legendFormat": "{{category}}",
+        "instant": true
+      }],
+      "options": {
+        "orientation": "horizontal",
+        "tooltip": { "mode": "single" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 80 }
+        }
+      }
+    }
+
+  ]
+}

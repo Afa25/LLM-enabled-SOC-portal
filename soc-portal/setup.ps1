@@ -240,6 +240,17 @@ function Invoke-SetupWizard {
     Write-Ok "LLM model: $LlmModel"
     Write-Host ""
 
+    # ── Optional heavy services ────────────────────────────────────────
+    Write-Heading "Optional services (OpenCTI + Velociraptor)"
+    Write-Info "OpenCTI is a threat-intelligence platform (~3 GB RAM)"
+    Write-Info "Velociraptor is a DFIR endpoint-visibility tool (~256 MB RAM)"
+    Write-Warn "Combined: ~3.3 GB extra RAM. Disable on low-memory servers."
+    Write-Host ""
+    $EnableFull    = Read-Confirm "Enable OpenCTI and Velociraptor?"
+    $ComposeProfiles = if ($EnableFull) { "full" } else { "" }
+    Write-Ok "Optional services: $(if ($EnableFull) { 'enabled' } else { 'disabled' })"
+    Write-Host ""
+
     # ── OpenCTI email ──────────────────────────────────────────────────
     Write-Heading "OpenCTI admin account"
     $OpenCtiEmail = Read-Input "Admin email" "admin@soc.local"
@@ -336,6 +347,11 @@ SERVER_IP=$ServerIP
 
 # -- Packet capture --------------------------------------------
 ENABLE_PACKET_CAPTURE=$EnableIDSStr
+
+# -- Optional services (OpenCTI + Velociraptor) ----------------
+# Set to 'full' to enable; leave empty to run core services only
+# Saves ~3.3 GB RAM when disabled
+COMPOSE_PROFILES=$ComposeProfiles
 "@
 
     # Write UTF-8 without BOM so Docker can read it
@@ -827,6 +843,39 @@ function Manage-PacketCapture {
     }
 }
 
+function Manage-OptionalServices {
+    param([string]$SubCommand = "status")
+    switch ($SubCommand.ToLower()) {
+        "enable" {
+            Update-EnvVar "COMPOSE_PROFILES" "full"
+            Write-Ok "Optional services enabled (OpenCTI + Velociraptor)"
+            Write-Info "Run: .\setup.ps1 start  to bring them up"
+        }
+        "disable" {
+            Update-EnvVar "COMPOSE_PROFILES" ""
+            $dc = if (Get-Command "docker" -ErrorAction SilentlyContinue) { "docker compose" } else { "docker-compose" }
+            try { Invoke-Expression "$dc stop opencti opencti-redis opencti-rabbitmq opencti-minio opencti-elasticsearch velociraptor 2>$null" } catch {}
+            Write-Ok "Optional services stopped and disabled"
+            Write-Info "~3.3 GB RAM freed on next restart"
+        }
+        "status" {
+            $prof = ""
+            if (Test-Path ".env") {
+                $prof = (Get-Content ".env" | Where-Object { $_ -match "^COMPOSE_PROFILES=" } |
+                    ForEach-Object { $_ -replace "^COMPOSE_PROFILES=", "" } | Select-Object -First 1)
+            }
+            if ($prof -eq "full") {
+                Write-Ok "Optional services: ENABLED (OpenCTI + Velociraptor)"
+            } else {
+                Write-Info "Optional services: disabled -- run: .\setup.ps1 optional-services enable"
+            }
+        }
+        default {
+            Write-Err "Usage: .\setup.ps1 optional-services [enable | disable | status]"
+        }
+    }
+}
+
 function Show-Usage {
     Write-Host ""
     Write-Host "  Usage:  .\setup.ps1 [command]" -ForegroundColor White
@@ -848,6 +897,9 @@ function Show-Usage {
     Write-Host "    packet-capture stop             Disable Zeek+Suricata"
     Write-Host "    packet-capture interface [if]   Change listening interface"
     Write-Host "    packet-capture status           Show IDS container status"
+    Write-Host "    optional-services enable        Start OpenCTI + Velociraptor (+3.3 GB RAM)"
+    Write-Host "    optional-services disable       Stop OpenCTI + Velociraptor (free RAM)"
+    Write-Host "    optional-services status        Show optional service state"
     Write-Host ""
     Write-Host "  Example service names for logs:" -ForegroundColor DarkGray
     Write-Host "    soc-portal  soc-wazuh-manager  soc-wazuh-indexer" -ForegroundColor DarkGray
@@ -869,7 +921,8 @@ switch ($Command.ToLower()) {
     "reset-password"  { Reset-PortalPassword }
     "disk-usage"      { Show-DiskUsage }
     "export-data"     { Export-SocData ([int]$(if ($Arg) { $Arg } else { 30 })) }
-    "packet-capture"  { Manage-PacketCapture $Arg $Arg2 }
+    "packet-capture"      { Manage-PacketCapture $Arg $Arg2 }
+    "optional-services"   { Manage-OptionalServices $Arg }
     { $_ -in "help", "--help", "-h" } { Show-Usage }
     default {
         Write-Err "Unknown command: $Command"
