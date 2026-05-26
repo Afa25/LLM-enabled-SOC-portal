@@ -162,8 +162,10 @@ services:
       soc-net:
         ipv4_address: 172.20.0.12
     depends_on:
-      - wazuh-indexer
-      - wazuh-manager
+      wazuh-indexer:
+        condition: service_healthy
+      wazuh-manager:
+        condition: service_started
 
   # ────────────────────────────────────────────────────────────────
   # GRAFANA
@@ -258,9 +260,9 @@ services:
   # Using zeekurity/zeek — the correct public image
   # ────────────────────────────────────────────────────────────────
   zeek:
-    image: zeek/zeek:latest
+    image: zeekurity/zeek:latest
     container_name: soc-zeek
-    restart: unless-stopped
+    restart: on-failure
     mem_limit: 256m
     memswap_limit: 256m
     network_mode: host
@@ -272,7 +274,10 @@ services:
       - ./configs/zeek/local.zeek:/usr/local/zeek/share/zeek/site/local.zeek:ro
     environment:
       - ZEEK_INTERFACE=${SOC_NETWORK_INTERFACE:-eth0}
-    command: zeek -i ${SOC_NETWORK_INTERFACE:-eth0} /usr/local/zeek/share/zeek/site/local.zeek
+    command: >
+      sh -c "zeek -i ${SOC_NETWORK_INTERFACE:-eth0}
+             /usr/local/zeek/share/zeek/site/local.zeek
+             LogAscii::use_json=T -C"
 
   # ────────────────────────────────────────────────────────────────
   # SURICATA (network IDS/IPS)
@@ -280,9 +285,9 @@ services:
   suricata:
     image: jasonish/suricata:latest
     container_name: soc-suricata
-    restart: unless-stopped
-    mem_limit: 384m
-    memswap_limit: 384m
+    restart: on-failure
+    mem_limit: 512m
+    memswap_limit: 512m
     network_mode: host
     cap_add:
       - NET_RAW
@@ -291,7 +296,7 @@ services:
     volumes:
       - suricata-logs:/var/log/suricata
       - ./configs/suricata/suricata.yaml:/etc/suricata/suricata.yaml
-    command: -i ${SOC_NETWORK_INTERFACE:-eth0} --af-packet
+    command: -i ${SOC_NETWORK_INTERFACE:-eth0} --af-packet -D --init-errors-fatal
 
   # ────────────────────────────────────────────────────────────────
   # OLLAMA (local LLM — no API key needed)
@@ -529,7 +534,7 @@ services:
     restart: unless-stopped
     mem_limit: 128m
     memswap_limit: 128m
-    profiles: [full]
+
     volumes:
       - opencti-redis-data:/data
     networks:
@@ -542,7 +547,7 @@ services:
     restart: unless-stopped
     mem_limit: 256m
     memswap_limit: 256m
-    profiles: [full]
+
     environment:
       - RABBITMQ_DEFAULT_USER=${OPENCTI_RABBITMQ_USER:-opencti}
       - RABBITMQ_DEFAULT_PASS=${OPENCTI_RABBITMQ_PASS:-opencti}
@@ -558,7 +563,7 @@ services:
     restart: unless-stopped
     mem_limit: 256m
     memswap_limit: 256m
-    profiles: [full]
+
     command: server /data
     environment:
       - MINIO_ROOT_USER=${OPENCTI_MINIO_USER:-opencti}
@@ -575,7 +580,7 @@ services:
     restart: unless-stopped
     mem_limit: 1g
     memswap_limit: 1g
-    profiles: [full]
+
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -598,7 +603,7 @@ services:
     restart: unless-stopped
     mem_limit: 1536m
     memswap_limit: 1536m
-    profiles: [full]
+
     environment:
       - NODE_OPTIONS=--max-old-space-size=1024
       - APP__PORT=8080
@@ -642,7 +647,7 @@ services:
     restart: unless-stopped
     mem_limit: 256m
     memswap_limit: 256m
-    profiles: [full]
+
     environment:
       - VEL_USER=admin
       - VEL_PASSWORD=${VELOCIRAPTOR_ADMIN_PASSWORD:-ChangeThisVelo1!}
