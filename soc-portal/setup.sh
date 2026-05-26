@@ -128,10 +128,37 @@ detect_interfaces() {
   echo "${ifaces:-eth0}"
 }
 
+# ── Kernel tuning (Linux only) ────────────────────────────────────────
+tune_kernel() {
+  # vm.max_map_count must be >= 262144 for Elasticsearch and OpenSearch.
+  # Docker Desktop pre-sets this in its VM; native Linux does not.
+  if [ "$(uname -s)" = "Linux" ]; then
+    local current
+    current=$(sysctl -n vm.max_map_count 2>/dev/null || echo 0)
+    if [ "$current" -lt 262144 ]; then
+      info "Setting vm.max_map_count=262144 (required for Wazuh + OpenCTI)..."
+      if sudo sysctl -w vm.max_map_count=262144 &>/dev/null; then
+        ok "vm.max_map_count set to 262144"
+        # Make it persistent across reboots
+        if ! grep -q "vm.max_map_count" /etc/sysctl.conf 2>/dev/null; then
+          echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf >/dev/null
+          ok "Persisted to /etc/sysctl.conf"
+        fi
+      else
+        warn "Could not set vm.max_map_count — run: sudo sysctl -w vm.max_map_count=262144"
+      fi
+    else
+      ok "vm.max_map_count=$current (OK)"
+    fi
+  fi
+}
+
 # ── Prerequisites ─────────────────────────────────────────────────────
 check_deps() {
   heading "Checking prerequisites"
   local fail=0
+
+  tune_kernel
 
   if command -v docker &>/dev/null; then
     ok "Docker: $(docker --version 2>&1 | head -1)"

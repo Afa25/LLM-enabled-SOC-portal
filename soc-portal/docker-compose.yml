@@ -38,6 +38,17 @@ volumes:
 services:
 
   # ────────────────────────────────────────────────────────────────
+  # KERNEL INIT — sets vm.max_map_count for Elasticsearch/OpenSearch
+  # Required on native Linux. Docker Desktop pre-sets this; Ubuntu does not.
+  # ────────────────────────────────────────────────────────────────
+  sysctl-init:
+    image: alpine
+    container_name: soc-sysctl-init
+    restart: "no"
+    privileged: true
+    command: sh -c "sysctl -w vm.max_map_count=262144 && echo 'vm.max_map_count set to 262144'"
+
+  # ────────────────────────────────────────────────────────────────
   # WAZUH CERT GENERATOR — runs once, generates all Wazuh certs
   # ────────────────────────────────────────────────────────────────
   wazuh-certgen:
@@ -87,6 +98,7 @@ services:
       soc-net:
         ipv4_address: 172.20.0.10
     depends_on:
+      - sysctl-init
       - wazuh-certs-fix
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/localhost/9200' 2>/dev/null && echo ok || exit 1"]
@@ -577,7 +589,8 @@ services:
     restart: unless-stopped
     mem_limit: 1g
     memswap_limit: 1g
-
+    depends_on:
+      - sysctl-init
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
