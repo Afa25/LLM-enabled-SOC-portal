@@ -61,7 +61,7 @@ services:
       - wazuh-certgen
     volumes:
       - wazuh-certs:/certificates
-    command: sh -c "chmod 755 /certificates && echo 'Cert directory permissions fixed.'"
+    command: sh -c "chmod -R 755 /certificates && chown -R 1000:0 /certificates && echo 'Cert directory permissions fixed.'"
 
   # ────────────────────────────────────────────────────────────────
   # WAZUH INDEXER (OpenSearch)
@@ -71,10 +71,10 @@ services:
     container_name: soc-wazuh-indexer
     restart: unless-stopped
     hostname: wazuh-indexer
-    mem_limit: 768m
-    memswap_limit: 768m
+    mem_limit: 2g
+    memswap_limit: 2g
     environment:
-      - "OPENSEARCH_JAVA_OPTS=-Xms256m -Xmx512m -XX:MaxDirectMemorySize=256m"
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx1g -XX:MaxDirectMemorySize=512m"
       - bootstrap.memory_lock=true
     ulimits:
       memlock: { soft: -1, hard: -1 }
@@ -240,8 +240,6 @@ services:
     restart: unless-stopped
     mem_limit: 64m
     memswap_limit: 64m
-    network_mode: host
-    pid: host
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
@@ -251,6 +249,9 @@ services:
       - '--path.sysfs=/host/sys'
       - '--path.rootfs=/rootfs'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      soc-net:
+        ipv4_address: 172.20.0.50
 
   # ────────────────────────────────────────────────────────────────
   # ZEEK (network traffic analysis)
@@ -572,8 +573,8 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
     container_name: soc-opencti-elasticsearch
     restart: unless-stopped
-    mem_limit: 640m
-    memswap_limit: 640m
+    mem_limit: 1g
+    memswap_limit: 1g
     profiles: [full]
     environment:
       - discovery.type=single-node

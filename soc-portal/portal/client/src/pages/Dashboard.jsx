@@ -273,10 +273,16 @@ export default function Dashboard() {
                 <p className="text-xs text-gray-500">Uptime</p>
                 <p className="text-lg font-bold text-white mt-0.5">{fmtUptime(promData?.uptime_s)}</p>
               </div>
-              <a href="/prometheus/" target="_blank" rel="noopener noreferrer"
-                className="flex items-center justify-center gap-1.5 w-full py-2 text-xs text-red-400 border border-red-900/40 rounded-lg hover:bg-red-900/10 transition-colors">
-                Open Prometheus →
-              </a>
+              <div className="flex gap-2">
+                <a href="/grafana/d/soc-metrics-dashboard" target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 flex-1 py-2 text-xs text-orange-400 border border-orange-900/40 rounded-lg hover:bg-orange-900/10 transition-colors">
+                  Grafana →
+                </a>
+                <a href="/prometheus/" target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 flex-1 py-2 text-xs text-red-400 border border-red-900/40 rounded-lg hover:bg-red-900/10 transition-colors">
+                  Prometheus →
+                </a>
+              </div>
             </div>
           </div>
         )}

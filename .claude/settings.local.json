@@ -67,7 +67,15 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Bash(cd /c/Users/Hp/Desktop/LLM-enabled-SOC-portal/soc-portal/portal && find . -type f -name \"*.js\" -o -name \"*.jsx\" -o -name \"*.ts\" -o -name \"*.tsx\" -o -name \"*.py\" | head -30)",
-      "Read(//c/c/Users/Hp/Desktop/LLM-enabled-SOC-portal/soc-portal/**)"
+      "Read(//c/c/Users/Hp/Desktop/LLM-enabled-SOC-portal/soc-portal/**)",
+      "Bash(python3 -c \"import secrets; print\\(secrets.token_hex\\(32\\)\\)\")",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(32\\).toString\\('hex'\\)\\)\")",
+      "Bash(grep -v \"^--$\")",
+      "Bash(xargs grep -l -i \"prometheus\\\\|metrics\")",
+      "Bash(xargs grep -l prometheus)",
+      "Bash(curl -s -X POST -u \"admin:ChangeThisGrafanaPassword1!\" http://localhost/grafana/api/admin/provisioning/dashboards/reload)",
+      "Bash(curl -s -X POST -u \"admin:ChangeThisGrafanaPassword1!\" \"http://localhost/grafana/api/admin/provisioning/dashboards/reload\" -L)",
+      "Bash(curl -sk -X POST -u \"admin:ChangeThisGrafanaPassword1!\" \"https://localhost/grafana/api/admin/provisioning/dashboards/reload\")"
     ]
   }
 }
