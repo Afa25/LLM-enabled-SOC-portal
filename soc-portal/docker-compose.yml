@@ -260,7 +260,7 @@ services:
   # Using zeekurity/zeek — the correct public image
   # ────────────────────────────────────────────────────────────────
   zeek:
-    image: zeekurity/zeek:latest
+    image: zeek/zeek:lts
     container_name: soc-zeek
     restart: on-failure
     mem_limit: 256m
@@ -274,10 +274,7 @@ services:
       - ./configs/zeek/local.zeek:/usr/local/zeek/share/zeek/site/local.zeek:ro
     environment:
       - ZEEK_INTERFACE=${SOC_NETWORK_INTERFACE:-eth0}
-    command: >
-      sh -c "zeek -i ${SOC_NETWORK_INTERFACE:-eth0}
-             /usr/local/zeek/share/zeek/site/local.zeek
-             LogAscii::use_json=T -C"
+    command: zeek -i ${SOC_NETWORK_INTERFACE:-eth0} /usr/local/zeek/share/zeek/site/local.zeek LogAscii::use_json=T -C
 
   # ────────────────────────────────────────────────────────────────
   # SURICATA (network IDS/IPS)
