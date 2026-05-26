@@ -179,14 +179,14 @@ function AuthProvider({ children }) {
     setUser(null);
   }
 
-  async function apiFetch(path, opts = {}) {
+  const apiFetch = useCallback(async (path, opts = {}) => {
     const res = await fetch(path, {
       ...opts,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...opts.headers }
     });
     if (res.status === 401) { logout(); return null; }
     return res;
-  }
+  }, [token]);
 
   return (
     <AuthCtx.Provider value={{ user, token, login, logout, apiFetch, initialising, pageStore, setPageState, registerPageInitial }}>

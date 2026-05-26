@@ -75,7 +75,29 @@
       "Bash(xargs grep -l prometheus)",
       "Bash(curl -s -X POST -u \"admin:ChangeThisGrafanaPassword1!\" http://localhost/grafana/api/admin/provisioning/dashboards/reload)",
       "Bash(curl -s -X POST -u \"admin:ChangeThisGrafanaPassword1!\" \"http://localhost/grafana/api/admin/provisioning/dashboards/reload\" -L)",
-      "Bash(curl -sk -X POST -u \"admin:ChangeThisGrafanaPassword1!\" \"https://localhost/grafana/api/admin/provisioning/dashboards/reload\")"
+      "Bash(curl -sk -X POST -u \"admin:ChangeThisGrafanaPassword1!\" \"https://localhost/grafana/api/admin/provisioning/dashboards/reload\")",
+      "Bash(curl -s \"https://api.github.com/repos/Velocidex/velociraptor/releases/tags/v0.73\")",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); assets=[a['name'] for a in data.get\\('assets',[]\\) if 'linux' in a['name'].lower\\(\\) and 'amd64' in a['name'].lower\\(\\)]; print\\('\\\\n'.join\\(assets\\)\\)\")",
+      "Bash(python3 -c \"import json,sys; [print\\(m['Source'],'->',m['Destination']\\) for m in json.load\\(sys.stdin\\)]\")",
+      "Bash(xargs grep -l \"ollama\\\\|llm\\\\|prompt\\\\|stream\")",
+      "Bash(xargs grep -l \"triage\\\\|ai\\\\|llm\\\\|ollama\")",
+      "PowerShell(docker exec soc-velociraptor /usr/local/bin/velociraptor --config /velociraptor/server.config.yaml user show admin 2>&1)",
+      "PowerShell(docker exec soc-velociraptor /usr/local/bin/velociraptor --config /velociraptor/server.config.yaml user add --role=administrator admin ChangeThisVelo1! 2>&1)",
+      "PowerShell(docker exec soc-velociraptor curl -sk -u \"admin:ChangeThisVelo1!\" https://localhost:8889/app/index.html -o /dev/null -w \"%{http_code}\" 2>&1)",
+      "PowerShell(docker exec soc-velociraptor curl -sk https://localhost:8889/ -o /dev/null -w \"%{http_code}\\\\n%{redirect_url}\" 2>&1)",
+      "PowerShell(docker exec soc-velociraptor curl -skL https://localhost:8889/ -o /dev/null -w \"%{http_code}\" 2>&1)",
+      "PowerShell(docker exec soc-velociraptor curl -skL https://localhost:8889/ -w \"\\\\n---HEADERS---\\\\n%{http_code}\" 2>&1)",
+      "PowerShell([Convert]::ToBase64String\\([Text.Encoding]::UTF8.GetBytes\\(\"admin:ChangeThisVelo1!\"\\)\\))",
+      "PowerShell(docker exec soc-nginx curl -sk -o /dev/null -w \"%{http_code}\" https://localhost:8889/ 2>&1)",
+      "PowerShell(docker exec soc-nginx nslookup soc-portal 2>&1)",
+      "PowerShell(docker exec soc-nginx cat /etc/resolv.conf 2>&1)",
+      "PowerShell(curl -sk -o $null -w \"%{http_code}\" https://localhost:8889/ 2>&1)",
+      "Bash(curl -sk -o /dev/null -w \"%{http_code}\" https://localhost:8889/)",
+      "PowerShell(python3 -c \"import json,sys; n=json.load\\(sys.stdin\\); [print\\(k, v['IPAddress']\\) for k,v in n.items\\(\\)]\")",
+      "Bash(docker network *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(c['Name'],c['IPv4Address']\\) for c in d[0]['Containers'].values\\(\\)]\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); nets=d[0]['NetworkSettings']['Networks']; [print\\(k,v.get\\('IPAddress',''\\)\\) for k,v in nets.items\\(\\)]\")",
+      "Bash(docker inspect *)"
     ]
   }
 }

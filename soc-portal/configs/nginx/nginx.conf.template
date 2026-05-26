@@ -169,7 +169,7 @@
       error_page 401 = @sso_login;
 
       set $upstream_opencti http://opencti:8080;
-      proxy_pass         $upstream_opencti/opencti/;
+      proxy_pass         $upstream_opencti;
       proxy_http_version 1.1;
       proxy_set_header   Upgrade           $http_upgrade;
       proxy_set_header   Connection        $connection_upgrade;
@@ -195,5 +195,61 @@
       proxy_set_header X-Real-IP         $remote_addr;
       proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto $scheme;
+    }
+  }
+
+  # ── Velociraptor GUI (port 8889, same portal TLS cert) ────────
+  # nginx handles TLS here so the browser trusts the same cert as
+  # the portal on 443 — no second cert warning.  Basic-auth creds
+  # are injected so the user never sees a Velociraptor login prompt.
+  # Portal SSO is still required.
+  server {
+    listen 8889 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/certs/server.crt;
+    ssl_certificate_key /etc/nginx/certs/server.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    location = /auth-check {
+      internal;
+      proxy_cache            auth_cache;
+      proxy_cache_valid      200 2m;
+      proxy_cache_key        "$cookie_soc_session$http_authorization";
+      proxy_cache_lock       on;
+      proxy_ignore_headers   Cache-Control Expires Set-Cookie;
+      set $upstream_portal http://soc-portal:4000;
+      proxy_pass              $upstream_portal/api/auth/validate;
+      proxy_pass_request_body off;
+      proxy_set_header        Content-Length "";
+      proxy_set_header        X-Original-URI $request_uri;
+      proxy_read_timeout      5s;
+    }
+
+    location @sso_login {
+      return 302 https://$host/login;
+    }
+
+    location / {
+      auth_request      /auth-check;
+      error_page 401  = @sso_login;
+
+      set $upstream_velo https://velociraptor:8889;
+      proxy_pass         $upstream_velo;
+      proxy_ssl_verify   off;
+      proxy_http_version 1.1;
+      proxy_set_header   Upgrade           $http_upgrade;
+      proxy_set_header   Connection        $connection_upgrade;
+      proxy_set_header   Host              velociraptor;
+      proxy_set_header   X-Real-IP         $remote_addr;
+      proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+      proxy_set_header   X-Forwarded-Proto $scheme;
+      proxy_set_header   Authorization     "Basic ${VELO_BASIC_AUTH_B64}";
+      proxy_read_timeout 300s;
     }
   }

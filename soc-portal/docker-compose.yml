@@ -434,10 +434,14 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "8889:8889"
     environment:
       # base64("admin:<WAZUH_API_PASSWORD>") — set in .env
       # Generate: echo -n "admin:YourPassword" | base64
       - WAZUH_BASIC_AUTH_B64=${WAZUH_BASIC_AUTH_B64}
+      # base64("admin:<VELOCIRAPTOR_ADMIN_PASSWORD>") — set in .env
+      # Generate: echo -n "admin:YourVeloPassword" | base64
+      - VELO_BASIC_AUTH_B64=${VELO_BASIC_AUTH_B64}
     volumes:
       # Template is processed by nginx entrypoint via envsubst on startup
       - ./configs/nginx/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
@@ -645,9 +649,9 @@ services:
       - opencti-elasticsearch
 
   # ────────────────────────────────────────────────────────────────
-  # VELOCIRAPTOR (endpoint visibility & DFIR)  (profile: full)
-  # GUI: https://<server-ip>:8889  (direct, own TLS — not proxied)
-  # Agent enrollment port: 8001
+  # VELOCIRAPTOR (endpoint visibility & DFIR)
+  # GUI: proxied via nginx at https://<server-ip>:8889 (portal SSO)
+  # Agent enrollment port: 8001 (direct, TLS by Velociraptor itself)
   # ────────────────────────────────────────────────────────────────
   velociraptor:
     build:
@@ -664,7 +668,6 @@ services:
     volumes:
       - velociraptor-data:/velociraptor
     ports:
-      - "8889:8889"
       - "8001:8001"
     networks:
       soc-net:
