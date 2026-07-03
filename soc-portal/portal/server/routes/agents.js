@@ -26,17 +26,19 @@ router.get('/', auth, async (req, res) => {
 });
 
 // ── GET /api/agents/enroll-info ───────────────────────────────
-// Returns server connection details used to build enrollment commands.
-// The manager URL is the internal Docker hostname — we return it as-is
-// and let the frontend substitute the user-supplied server IP.
+// Returns externally reachable connection details used to build enrollment
+// commands. Docker services keep their internal DNS names, but endpoints must
+// use the host device IP, not a Docker bridge/NAT address.
 router.get('/enroll-info', auth, (req, res) => {
-  const managerUrl = process.env.WAZUH_MANAGER_URL || 'https://wazuh-manager:55000';
+  const serverHint = process.env.SERVER_IP || req.headers.host?.split(':')[0] || 'localhost';
   res.json({
     wazuh_version:  '4.12.0',
     wazuh_port:     1514,
     wazuh_enroll:   1515,
-    // Prefer the explicit SERVER_IP env var; fall back to request host.
-    server_hint: process.env.SERVER_IP || req.headers.host?.split(':')[0] || 'localhost',
+    server_hint:    serverHint,
+    portal_url:     `https://${serverHint}`,
+    wazuh_api_url:  `https://${serverHint}:55000`,
+    wazuh_manager:  serverHint,
   });
 });
 

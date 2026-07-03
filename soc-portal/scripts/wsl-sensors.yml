@@ -1,0 +1,307 @@
+---
+# =============================================================================
+# wsl-sensors.yml
+# Ansible playbook — installs and configures Zeek and Suricata natively
+# inside WSL2 Ubuntu so they can monitor real Windows network interfaces.
+#
+# WHY WSL2 INSTEAD OF DOCKER:
+#   Docker Desktop on Windows runs containers inside a WSL2 virtual machine
+#   that sits behind a Hyper-V virtual switch. Containers only see the virtual
+#   interface (172.x.x.x), not your real Windows NIC. Zeek and Suricata need
+#   raw packet access to a real interface. Running them natively in WSL2 with
+#   mirrored networking solves this — WSL2 sees your actual Windows adapters.
+#
+# PRE-REQUISITES (run once in PowerShell as Administrator before this playbook):
+#   1. wsl --install -d Ubuntu          # install WSL2 + Ubuntu
+#   2. Add to C:\Users\<you>\.wslconfig:
+#        [wsl2]
+#        networkingMode=mirrored        # mirrors Windows NICs into WSL2 (Win11)
+#   3. wsl --shutdown && wsl            # restart WSL2 to apply .wslconfig
+#   4. Inside WSL2: pip3 install ansible
+#
+# USAGE (run inside WSL2 Ubuntu terminal):
+#   ansible-playbook wsl-sensors.yml --ask-become-pass
+#
+# AFTER RUNNING:
+#   - Suricata logs  → /var/log/suricata/eve.json
+#   - Zeek logs      → /var/log/zeek/
+#   - Docker mounts these paths as read-only volumes (see docker-compose.yml)
+# =============================================================================
+
+- name: Install and configure Zeek + Suricata on WSL2 Ubuntu
+  hosts: localhost          # run on this machine (inside WSL2), not a remote host
+  connection: local         # no SSH — execute directly on localhost
+  become: true              # sudo required for apt, systemd, file writes to /etc
+
+  # ---------------------------------------------------------------------------
+  # VARIABLES — change monitor_interface to match your Windows NIC name.
+  # Run `ip link` inside WSL2 after enabling mirrored mode to see your adapters.
+  # Common names: eth0 (Ethernet), wlan0 (Wi-Fi), or the Windows adapter name.
+  # ---------------------------------------------------------------------------
+  vars:
+    monitor_interface: eth0           # interface Zeek and Suricata will sniff on
+    suricata_log_dir:  /var/log/suricata   # where Suricata writes eve.json
+    zeek_log_dir:      /var/log/zeek       # where Zeek writes conn.log, dns.log, etc.
+    zeek_install_dir:  /opt/zeek           # Zeek default install prefix
+    ubuntu_version:    "22.04"             # used to build the Zeek repo URL
+
+  # ===========================================================================
+  # SECTION 1 — SYSTEM PREREQUISITES
+  # Install shared dependencies needed by both Zeek and Suricata before
+  # adding their dedicated repositories.
+  # ===========================================================================
+  tasks:
+
+    - name: Refresh apt package index
+      # Ensures we pull the latest package lists before any installs.
+      # cache_valid_time: skip refresh if the cache is less than 1 hour old
+      # to avoid re-downloading metadata on re-runs.
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install shared build and utility dependencies
+      # curl        — downloads GPG keys for third-party repos
+      # gnupg       — verifies GPG signatures on those keys
+      # software-properties-common — provides add-apt-repository
+      # python3-pip — used to install ansible itself on first run
+      apt:
+        name:
+          - curl
+          - gnupg
+          - software-properties-common
+          - python3-pip
+        state: present
+
+  # ===========================================================================
+  # SECTION 2 — SURICATA
+  # Suricata is the IDS/IPS engine. It reads network packets in real time,
+  # matches them against a ruleset (downloaded via suricata-update), and
+  # writes alerts + metadata to eve.json in JSON format.
+  # The SOC portal's hunting page reads this file for threat analysis.
+  # ===========================================================================
+
+    - name: Add Suricata stable PPA (OISF official repository)
+      # OISF (Open Information Security Foundation) maintains the official
+      # Ubuntu PPA. Using this instead of the default Ubuntu package ensures
+      # we get the latest stable release, not an outdated distro version.
+      apt_repository:
+        repo: ppa:oisf/suricata-stable
+        state: present
+        update_cache: yes
+
+    - name: Install Suricata
+      apt:
+        name: suricata
+        state: present
+        update_cache: yes
+
+    - name: Configure Suricata to sniff on the correct interface
+      # The default suricata.yaml has a placeholder interface. We replace it
+      # with the interface variable defined above. The regex matches the first
+      # `- interface:` line inside the `af-packet:` section.
+      # backrefs: yes — only replace lines that actually match the regex
+      lineinfile:
+        path: /etc/suricata/suricata.yaml
+        regexp: '^\s*- interface:'
+        line: "  - interface: {{ monitor_interface }}"
+        backrefs: yes
+
+    - name: Set Suricata EVE JSON output path
+      # eve.json is the structured alert log that the portal reads.
+      # We point it at our dedicated log directory so Docker volumes
+      # can mount it consistently regardless of Suricata version.
+      lineinfile:
+        path: /etc/suricata/suricata.yaml
+        regexp: '^\s*filename: eve.json'
+        line: "  filename: {{ suricata_log_dir }}/eve.json"
+        backrefs: yes
+
+    - name: Download and update Suricata rule sets
+      # suricata-update pulls the latest Emerging Threats ruleset and other
+      # enabled sources. Rules are what Suricata matches packets against to
+      # generate alerts. Run this periodically (or add a cron job) to stay
+      # current with new threat signatures.
+      command: suricata-update
+      changed_when: false   # treat as idempotent — always run but don't flag as changed
+
+    - name: Ensure Suricata log directory exists with correct permissions
+      # Creates /var/log/suricata if it doesn't exist.
+      # mode 0755 — world-readable so Docker containers can read the logs
+      # without needing root or special group membership.
+      file:
+        path: "{{ suricata_log_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Enable and start Suricata service
+      # systemd manages Suricata as a background service.
+      # enabled: yes — starts automatically when WSL2 boots (if systemd is active)
+      # state: started — start it now if not already running
+      #
+      # NOTE: WSL2 supports systemd from Ubuntu 22.04 + WSL 0.67.6+.
+      # If systemd is not available, start manually with: sudo suricata -D -i eth0
+      systemd:
+        name: suricata
+        enabled: yes
+        state: started
+
+  # ===========================================================================
+  # SECTION 3 — ZEEK
+  # Zeek is a network analysis framework. Unlike Suricata (which fires alerts),
+  # Zeek generates rich structured logs: conn.log (all connections), dns.log,
+  # http.log, ssl.log, etc. These give the SOC portal a full picture of network
+  # behaviour, not just detected threats.
+  # ===========================================================================
+
+    - name: Import Zeek GPG signing key
+      # The Zeek project distributes packages via the openSUSE Build Service.
+      # We download the repository signing key and store it in the trusted
+      # keyrings directory so apt can verify package authenticity.
+      # args.creates: skip this task if the keyring file already exists (idempotent)
+      shell: |
+        curl -fsSL \
+          https://download.opensuse.org/repositories/security:zeek/xUbuntu_{{ ubuntu_version }}/Release.key \
+          | gpg --dearmor -o /usr/share/keyrings/zeek-archive-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/zeek-archive-keyring.gpg
+
+    - name: Add Zeek apt repository
+      # Registers the Zeek OBS repository so apt can find the zeek package.
+      # signed-by references the keyring we imported above — apt will reject
+      # packages that don't match this key (supply chain protection).
+      apt_repository:
+        repo: >
+          deb [signed-by=/usr/share/keyrings/zeek-archive-keyring.gpg]
+          https://download.opensuse.org/repositories/security:zeek/xUbuntu_{{ ubuntu_version }}/ /
+        filename: zeek
+        state: present
+        update_cache: yes
+
+    - name: Install Zeek
+      apt:
+        name: zeek
+        state: present
+        update_cache: yes
+
+    - name: Add Zeek binaries to system PATH
+      # Zeek installs to /opt/zeek/bin which is not in the default PATH.
+      # This creates a profile.d script so zeek, zeekctl, etc. are accessible
+      # from any shell session without needing the full path.
+      copy:
+        dest: /etc/profile.d/zeek.sh
+        content: 'export PATH=$PATH:/opt/zeek/bin'
+        mode: '0644'
+
+    - name: Configure Zeek to monitor the correct interface
+      # node.cfg tells ZeekControl which interface to sniff on.
+      # We replace the default interface= line with our variable.
+      lineinfile:
+        path: "{{ zeek_install_dir }}/etc/node.cfg"
+        regexp: '^interface='
+        line: "interface={{ monitor_interface }}"
+
+    - name: Set Zeek log output directory
+      # zeekctl.cfg controls where Zeek writes its logs.
+      # Default is /opt/zeek/logs — we redirect to /var/log/zeek so it
+      # sits alongside Suricata logs and Docker volumes can mount one directory.
+      lineinfile:
+        path: "{{ zeek_install_dir }}/etc/zeekctl.cfg"
+        regexp: '^LogDir\s*='
+        line: "LogDir = {{ zeek_log_dir }}"
+
+    - name: Ensure Zeek log directory exists with correct permissions
+      # Same reasoning as Suricata — world-readable so Docker containers
+      # can access the logs without elevated privileges.
+      file:
+        path: "{{ zeek_log_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy Zeek via ZeekControl
+      # `zeekctl deploy` does three things:
+      #   1. install — compiles scripts and sets up the environment
+      #   2. start   — launches the Zeek worker processes
+      # This must be run after any configuration change.
+      # ignore_errors: yes — first-run may warn about existing state; non-fatal.
+      command: "{{ zeek_install_dir }}/bin/zeekctl deploy"
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Install ZeekControl cron job for log rotation
+      # Zeek logs rotate hourly by default but ZeekControl must be told to
+      # check. This cron entry runs `zeekctl cron` every 5 minutes to handle
+      # log rotation, crash recovery, and health checks automatically.
+      cron:
+        name: "ZeekControl maintenance"
+        minute: "*/5"
+        job: "/opt/zeek/bin/zeekctl cron"
+        state: present
+
+  # ===========================================================================
+  # SECTION 4 — VERIFICATION
+  # Confirm both services are running and producing logs before finishing.
+  # The debug tasks print status to the Ansible output so you can see
+  # immediately if something didn't start correctly.
+  # ===========================================================================
+
+    - name: Check Suricata process is running
+      # pgrep returns exit code 0 if the process is found, 1 if not.
+      # register: saves the result to a variable we can check below.
+      # failed_when: false — don't fail the playbook if Suricata isn't running;
+      # we want to surface the issue via the debug message instead.
+      command: pgrep suricata
+      register: suricata_check
+      changed_when: false
+      failed_when: false
+
+    - name: Report Suricata status
+      debug:
+        msg: >
+          {% if suricata_check.rc == 0 %}
+          Suricata is RUNNING (PID {{ suricata_check.stdout }}).
+          Logs → {{ suricata_log_dir }}/eve.json
+          {% else %}
+          WARNING: Suricata does not appear to be running.
+          Check: sudo systemctl status suricata
+          Or start manually: sudo suricata -D -i {{ monitor_interface }}
+          {% endif %}
+
+    - name: Check Zeek processes are running
+      command: pgrep zeek
+      register: zeek_check
+      changed_when: false
+      failed_when: false
+
+    - name: Report Zeek status
+      debug:
+        msg: >
+          {% if zeek_check.rc == 0 %}
+          Zeek is RUNNING. Logs → {{ zeek_log_dir }}/
+          {% else %}
+          WARNING: Zeek does not appear to be running.
+          Check: /opt/zeek/bin/zeekctl status
+          Or restart: sudo /opt/zeek/bin/zeekctl restart
+          {% endif %}
+
+    - name: Final summary
+      debug:
+        msg:
+          - "======================================================="
+          - "  WSL2 sensor setup complete"
+          - "======================================================="
+          - "  Interface monitored : {{ monitor_interface }}"
+          - "  Suricata eve.json   : {{ suricata_log_dir }}/eve.json"
+          - "  Zeek logs           : {{ zeek_log_dir }}/"
+          - "  "
+          - "  Next step: ensure docker-compose.yml mounts these"
+          - "  paths as read-only volumes into the soc-portal container:"
+          - "  "
+          - "    volumes:"
+          - "      - {{ suricata_log_dir }}:{{ suricata_log_dir }}:ro"
+          - "      - {{ zeek_log_dir }}:/data/zeek:ro"
+          - "======================================================="

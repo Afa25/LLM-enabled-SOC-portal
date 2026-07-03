@@ -97,7 +97,17 @@
       "Bash(docker network *)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(c['Name'],c['IPv4Address']\\) for c in d[0]['Containers'].values\\(\\)]\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); nets=d[0]['NetworkSettings']['Networks']; [print\\(k,v.get\\('IPAddress',''\\)\\) for k,v in nets.items\\(\\)]\")",
-      "Bash(docker inspect *)"
+      "Bash(docker inspect *)",
+      "Bash(docker compose *)",
+      "Bash(curl -sk https://localhost/api/health)",
+      "Bash(code --open-url \"https://localhost\")",
+      "PowerShell(head -40)",
+      "PowerShell(curl -sk https://localhost/api/health 2>&1)",
+      "PowerShell(docker exec soc-portal node -e \"const tools = require\\('./server/services/agentTools'\\); const r = require\\('./server/routes/chat'\\); console.log\\('agentTools loaded:', typeof tools.executeTool\\); console.log\\('getTier:', typeof tools.getTier\\); console.log\\('chat router:', typeof r.stack\\); console.log\\('approve route exists:', r.stack.some\\(l => l.route && l.route.path && l.route.path.includes\\('approve'\\)\\)\\); \" 2>&1)",
+      "PowerShell(docker exec soc-portal wget -qO- \"http://localhost:4000/api/chat/approve/test\" --post-data='{\"approved\":true}' --header='Content-Type: application/json' 2>&1)",
+      "PowerShell(docker exec soc-portal wget -qO- \"http://localhost:4000/api/chat/approve/test\" --post-data='{}' --header='Content-Type: application/json' --server-response 2>&1)",
+      "PowerShell(docker exec soc-portal docker ps --format \"table {{.Names}}\\\\t{{.Status}}\" 2>&1)",
+      "PowerShell(docker exec soc-portal wget -qO- http://localhost:4000/api/health 2>&1)"
     ]
   }
 }

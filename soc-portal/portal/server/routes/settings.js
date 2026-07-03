@@ -24,4 +24,21 @@ router.get('/network', auth, (req, res) => {
   res.json({ current, interfaces: addrs });
 });
 
+router.get('/public-endpoints', auth, (req, res) => {
+  const host = process.env.SERVER_IP
+            || req.headers.host?.split(':')[0]
+            || 'localhost';
+
+  res.json({
+    host,
+    portal: `https://${host}`,
+    wazuh: `https://${host}/wazuh`,
+    wazuh_api: `https://${host}:55000`,
+    grafana: `https://${host}/grafana`,
+    opencti: `https://${host}/opencti`,
+    velociraptor: `https://${host}:8889`,
+    prometheus: `https://${host}/prometheus`
+  });
+});
+
 module.exports = router;

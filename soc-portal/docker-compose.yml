@@ -16,6 +16,7 @@ volumes:
   wazuh-indexer-data:
   wazuh-manager-data:
   wazuh-logs:
+  chromadb-data:
   grafana-data:
   prometheus-data:
   prometheus-targets:
@@ -24,6 +25,8 @@ volumes:
   portal-backups:
   zeek-logs:
   suricata-logs:
+  crowdsec-data:
+  crowdsec-config:
   nginx-logs:
   nginx-certs:
   wazuh-dashboard-config:
@@ -121,7 +124,7 @@ services:
       - INDEXER_URL=https://wazuh-indexer:9200
       - INDEXER_USERNAME=admin
       - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD}
-      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - FILEBEAT_SSL_VERIFICATION_MODE=none
       - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/wazuh/root-ca.pem
       - SSL_CERTIFICATE=/etc/ssl/wazuh/wazuh.manager.pem
       - SSL_KEY=/etc/ssl/wazuh/wazuh.manager-key.pem
@@ -132,7 +135,6 @@ services:
       - wazuh-logs:/var/ossec/logs
       - ./configs/wazuh/manager/ossec.conf:/var/ossec/etc/ossec.conf:ro
       - ./configs/wazuh/manager/local_rules.xml:/var/ossec/etc/rules/local_rules.xml:ro
-      - ./configs/wazuh/manager/filebeat.yml:/etc/filebeat/filebeat.yml
       - ./configs/wazuh/manager/s6/filebeat-run:/etc/services.d/filebeat/run
       - wazuh-certs:/etc/ssl/wazuh:ro
     ports:
@@ -207,6 +209,7 @@ services:
       - GF_AUTH_DISABLE_LOGIN_FORM=false
       - GF_NEWS_NEWS_FEED_ENABLED=false
       - WAZUH_INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD}
+      - GF_INSTALL_PLUGINS=grafana-opensearch-datasource
     volumes:
       - grafana-data:/var/lib/grafana
       - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -286,6 +289,7 @@ services:
       - ./configs/zeek/local.zeek:/usr/local/zeek/share/zeek/site/local.zeek:ro
     environment:
       - ZEEK_INTERFACE=${SOC_NETWORK_INTERFACE:-eth0}
+    working_dir: /usr/local/zeek/logs
     command: zeek -i ${SOC_NETWORK_INTERFACE:-eth0} /usr/local/zeek/share/zeek/site/local.zeek LogAscii::use_json=T -C
 
   # ────────────────────────────────────────────────────────────────
@@ -294,7 +298,7 @@ services:
   suricata:
     image: jasonish/suricata:latest
     container_name: soc-suricata
-    restart: on-failure
+    restart: unless-stopped
     mem_limit: 512m
     memswap_limit: 512m
     network_mode: host
@@ -305,7 +309,30 @@ services:
     volumes:
       - suricata-logs:/var/log/suricata
       - ./configs/suricata/suricata.yaml:/etc/suricata/suricata.yaml
-    command: -i ${SOC_NETWORK_INTERFACE:-eth0} --af-packet -D --init-errors-fatal
+    command: -i ${SOC_NETWORK_INTERFACE:-eth0} --af-packet
+
+  # ────────────────────────────────────────────────────────────────
+  # CROWDSEC — collaborative IPS / threat intelligence
+  # API key for bouncers: crowdsec cscli bouncers add soc-portal
+  # ────────────────────────────────────────────────────────────────
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: soc-crowdsec
+    restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
+    environment:
+      - GID=1000
+      - COLLECTIONS=crowdsecurity/linux crowdsecurity/sshd crowdsecurity/nginx crowdsecurity/http-cve crowdsecurity/windows-cve
+      - CUSTOM_HOSTNAME=soc-crowdsec
+    volumes:
+      - crowdsec-data:/var/lib/crowdsec/data
+      - crowdsec-config:/etc/crowdsec
+      - nginx-logs:/var/log/nginx:ro
+      - wazuh-logs:/var/log/wazuh:ro
+    networks:
+      soc-net:
+        ipv4_address: 172.20.0.23
 
   # ────────────────────────────────────────────────────────────────
   # OLLAMA (local LLM — no API key needed)
@@ -359,6 +386,25 @@ services:
   # ────────────────────────────────────────────────────────────────
   # SOC PORTAL
   # ────────────────────────────────────────────────────────────────
+  # ────────────────────────────────────────────────────────────────
+  # CHROMADB — vector store for RAG (all SOC tool events indexed here)
+  # ────────────────────────────────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:0.5.23
+    container_name: soc-chromadb
+    restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+      - CHROMA_SERVER_AUTHN_CREDENTIALS_FILE=
+    volumes:
+      - chromadb-data:/chroma/.chroma
+    networks:
+      soc-net:
+        ipv4_address: 172.20.0.22
+
   soc-portal:
     build:
       context: ./portal
@@ -378,6 +424,8 @@ services:
       - WAZUH_INDEXER_PASS=${WAZUH_INDEXER_PASSWORD}
       - OLLAMA_URL=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
+      - CHROMADB_URL=http://chromadb:8000
+      - EMBED_MODEL=${EMBED_MODEL:-nomic-embed-text}
       # TLS: CA cert is mounted below. Set WAZUH_TLS_SKIP_VERIFY=true in .env
       # only if you have not yet deployed the Wazuh certs directory.
       - WAZUH_CA_CERT=/app/certs/root-ca.pem
@@ -387,10 +435,13 @@ services:
       - GRAFANA_PASS=${GRAFANA_PASSWORD}
       - OPENCTI_URL=http://opencti:8080/opencti
       - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - CROWDSEC_URL=http://crowdsec:8080
+      - CROWDSEC_API_KEY=${CROWDSEC_BOUNCER_KEY}
       - VELOCIRAPTOR_URL=http://velociraptor:8889
       - JWT_SECRET=${JWT_SECRET}
       - PORTAL_USER=${PORTAL_USER:-admin}
       - PORTAL_PASS=${PORTAL_PASS}
+      - SERVER_IP=${SERVER_IP}
     volumes:
       - portal-db:/app/data
       - suricata-logs:/data/suricata:ro

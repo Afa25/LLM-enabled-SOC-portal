@@ -280,6 +280,14 @@ router.get('/ids-metrics', (req, res) => {
     lines.push('# TYPE soc_ids_zeek_available gauge');
     emit('soc_ids_zeek_available', null, avail);
 
+    // Always emit scalar metrics so Grafana never gets N/A
+    lines.push('# HELP soc_ids_zeek_connections_parsed Connections in current log window');
+    lines.push('# TYPE soc_ids_zeek_connections_parsed gauge');
+    lines.push('# HELP soc_ids_zeek_bytes_total Bytes transferred in current log window');
+    lines.push('# TYPE soc_ids_zeek_bytes_total gauge');
+    lines.push('# HELP soc_ids_zeek_connections_proto Connections by protocol');
+    lines.push('# TYPE soc_ids_zeek_connections_proto gauge');
+
     if (conns) {
       const byProto = {};
       let bytesIn = 0, bytesOut = 0;
@@ -288,20 +296,16 @@ router.get('/ids-metrics', (req, res) => {
         if (c.bytes_in  != null) bytesIn  += c.bytes_in;
         if (c.bytes_out != null) bytesOut += c.bytes_out;
       }
-      lines.push('# HELP soc_ids_zeek_connections_parsed Connections in current log window');
-      lines.push('# TYPE soc_ids_zeek_connections_parsed gauge');
       emit('soc_ids_zeek_connections_parsed', null, conns.length);
-
-      lines.push('# HELP soc_ids_zeek_bytes_total Bytes transferred in current log window');
-      lines.push('# TYPE soc_ids_zeek_bytes_total gauge');
       emit('soc_ids_zeek_bytes_total', { direction: 'inbound'  }, bytesIn);
       emit('soc_ids_zeek_bytes_total', { direction: 'outbound' }, bytesOut);
-
-      lines.push('# HELP soc_ids_zeek_connections_proto Connections by protocol');
-      lines.push('# TYPE soc_ids_zeek_connections_proto gauge');
       for (const [proto, count] of Object.entries(byProto)) {
         emit('soc_ids_zeek_connections_proto', { proto }, count);
       }
+    } else {
+      emit('soc_ids_zeek_connections_parsed', null, 0);
+      emit('soc_ids_zeek_bytes_total', { direction: 'inbound'  }, 0);
+      emit('soc_ids_zeek_bytes_total', { direction: 'outbound' }, 0);
     }
   } catch {}
 

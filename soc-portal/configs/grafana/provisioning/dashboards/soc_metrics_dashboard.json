@@ -89,7 +89,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
       "datasource": { "type": "prometheus", "uid": "prometheus-main" },
       "targets": [{
-        "expr": "(1 - node_filesystem_avail_bytes{fstype!=\"tmpfs\",mountpoint=\"/\"} / node_filesystem_size_bytes{fstype!=\"tmpfs\",mountpoint=\"/\"}) * 100",
+        "expr": "avg((1 - node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs|devtmpfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs|devtmpfs\"}) * 100)",
         "refId": "A",
         "legendFormat": ""
       }],

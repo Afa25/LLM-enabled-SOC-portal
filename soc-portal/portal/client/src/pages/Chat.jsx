@@ -5,10 +5,10 @@ import { useAuth } from '../App';
 import {
   MessageSquare, Send, Trash2, Bot, User,
   Loader, Zap, Shield, AlertTriangle, BookOpen,
-  Search, ToggleLeft, ToggleRight, ChevronDown, Settings
+  Search, ToggleLeft, ToggleRight, Settings
 } from 'lucide-react';
 
-// ── Tiny inline markdown renderer ────────────────────────────
+// ── Tiny inline markdown renderer ────────────────────────────────────────────
 function Markdown({ text }) {
   if (!text) return null;
   const lines = text.split('\n');
@@ -27,11 +27,11 @@ function Markdown({ text }) {
 
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    if (/^### /.test(l))     { els.push(<h3 key={key++} className="text-base font-bold text-white mt-4 mb-1">{l.slice(4)}</h3>);      continue; }
-    if (/^## /.test(l))      { els.push(<h2 key={key++} className="text-lg font-bold text-blue-400 mt-5 mb-1 border-b border-gray-700 pb-1">{l.slice(3)}</h2>);  continue; }
-    if (/^# /.test(l))       { els.push(<h1 key={key++} className="text-xl font-bold text-white mt-5 mb-2">{l.slice(2)}</h1>);        continue; }
-    if (/^[-*] /.test(l))    { els.push(<li key={key++} className="text-gray-300 text-sm ml-4 list-disc my-0.5">{inline(l.slice(2))}</li>); continue; }
-    if (/^\d+\. /.test(l))   { els.push(<li key={key++} className="text-gray-300 text-sm ml-4 list-decimal my-0.5">{inline(l.replace(/^\d+\. /,''))}</li>); continue; }
+    if (/^### /.test(l))   { els.push(<h3 key={key++} className="text-base font-bold text-white mt-4 mb-1">{l.slice(4)}</h3>); continue; }
+    if (/^## /.test(l))    { els.push(<h2 key={key++} className="text-lg font-bold text-blue-400 mt-5 mb-1 border-b border-gray-700 pb-1">{l.slice(3)}</h2>); continue; }
+    if (/^# /.test(l))     { els.push(<h1 key={key++} className="text-xl font-bold text-white mt-5 mb-2">{l.slice(2)}</h1>); continue; }
+    if (/^[-*] /.test(l))  { els.push(<li key={key++} className="text-gray-300 text-sm ml-4 list-disc my-0.5">{inline(l.slice(2))}</li>); continue; }
+    if (/^\d+\. /.test(l)) { els.push(<li key={key++} className="text-gray-300 text-sm ml-4 list-decimal my-0.5">{inline(l.replace(/^\d+\. /,''))}</li>); continue; }
     if (/^```/.test(l)) {
       const block = [];
       i++;
@@ -39,38 +39,36 @@ function Markdown({ text }) {
       els.push(<pre key={key++} className="bg-gray-950 border border-gray-800 rounded-lg p-3 my-2 overflow-x-auto text-xs font-mono text-green-400 whitespace-pre">{block.join('\n')}</pre>);
       continue;
     }
-    if (l.trim() === '')     { els.push(<div key={key++} className="h-1.5" />); continue; }
-    if (/^---+$/.test(l))   { els.push(<hr  key={key++} className="border-gray-700 my-3" />);                                        continue; }
+    if (l.trim() === '')   { els.push(<div key={key++} className="h-1.5" />); continue; }
+    if (/^---+$/.test(l))  { els.push(<hr  key={key++} className="border-gray-700 my-3" />); continue; }
     els.push(<p key={key++} className="text-gray-300 text-sm leading-relaxed">{inline(l)}</p>);
   }
 
   return <div className="space-y-0.5">{els}</div>;
 }
 
-// ── Suggested prompts ─────────────────────────────────────────
+// ── Suggested prompts ─────────────────────────────────────────────────────────
 const SUGGESTIONS = [
-  { icon: AlertTriangle, label: 'Top threats now',           prompt: 'Based on the current SOC context, what are the top 3 threats I should be focusing on right now?' },
-  { icon: Search,        label: 'Investigate brute force',   prompt: 'Walk me through how to investigate a brute-force SSH alert. What logs should I check, and what does escalation look like?' },
-  { icon: Shield,        label: 'MITRE T1110 explained',     prompt: 'Explain MITRE ATT&CK technique T1110 (Brute Force) and how to detect and respond to it in a Wazuh SIEM environment.' },
-  { icon: BookOpen,      label: 'Daily SOC checklist',       prompt: 'Give me a practical SOC analyst daily checklist — what should I review every morning when I start my shift?' },
-  { icon: Zap,           label: 'Triage a critical alert',   prompt: 'An alert just fired: Level 12, rule "Multiple failed logins then success", agent WEBAPP-01. Walk me through triaging this step by step.' },
-  { icon: Settings,      label: 'Tune false positives',      prompt: 'I\'m getting too many false positive alerts for sudo privilege escalation. How do I tune Wazuh rules to reduce noise without missing real threats?' },
+  { icon: AlertTriangle, label: 'Current threat level',   prompt: 'Based on the current SOC context, what is our threat level right now and what should I focus on?' },
+  { icon: Search,        label: 'Analyse alerts',         prompt: 'Summarise the current alert distribution — what do the top categories tell us about what is happening?' },
+  { icon: Shield,        label: 'Brute force check',      prompt: 'Are there any signs of brute force or credential stuffing in the current alert data?' },
+  { icon: Zap,           label: 'MITRE ATT&CK mapping',   prompt: 'Map the currently observed alerts to MITRE ATT&CK tactics and explain what each technique means.' },
+  { icon: BookOpen,      label: 'SOC playbook',           prompt: 'Give me a step-by-step investigation playbook for the most critical active alert category.' },
+  { icon: Search,        label: 'Lateral movement',       prompt: 'Explain lateral movement (T1021) and what Wazuh rules to watch for in our environment.' },
 ];
 
-// ── Message bubble ────────────────────────────────────────────
-function Message({ msg, isLast }) {
+// ── Message bubble ────────────────────────────────────────────────────────────
+function Message({ msg }) {
   const isUser = msg.role === 'user';
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-      {/* Avatar */}
       <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
         isUser ? 'bg-blue-600' : 'bg-purple-600/40 border border-purple-500/30'
       }`}>
         {isUser ? <User size={14} className="text-white" /> : <Bot size={14} className="text-purple-300" />}
       </div>
 
-      {/* Bubble */}
       <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${
         isUser
           ? 'bg-blue-600 text-white rounded-tr-sm'
@@ -91,24 +89,23 @@ function Message({ msg, isLast }) {
   );
 }
 
-// ── Main chat page ────────────────────────────────────────────
+// ── Main chat page ────────────────────────────────────────────────────────────
 export default function Chat() {
   const { token } = useAuth();
 
-  const [messages,    setMessages]    = useState([]);
-  const [input,       setInput]       = useState('');
-  const [streaming,   setStreaming]   = useState(false);
-  const [useContext,  setUseContext]  = useState(true);
-  const [model,       setModel]       = useState('llama3.2:3b');
-  const [models,      setModels]      = useState(['llama3.2:3b']);
-  const [showSettings,setShowSettings]= useState(false);
-  const [error,       setError]       = useState(null);
+  const [messages,     setMessages]     = useState([]);
+  const [input,        setInput]        = useState('');
+  const [streaming,    setStreaming]     = useState(false);
+  const [useContext,   setUseContext]    = useState(true);
+  const [model,        setModel]         = useState('llama3.2:3b');
+  const [models,       setModels]        = useState(['llama3.2:3b']);
+  const [showSettings, setShowSettings] = useState(false);
+  const [error,        setError]         = useState(null);
 
-  const bottomRef  = useRef(null);
-  const inputRef   = useRef(null);
-  const abortRef   = useRef(null); // AbortController for in-flight stream
+  const bottomRef = useRef(null);
+  const inputRef  = useRef(null);
+  const abortRef  = useRef(null);
 
-  // Load available models
   useEffect(() => {
     fetch('/api/chat/models', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
@@ -116,7 +113,6 @@ export default function Chat() {
       .catch(() => {});
   }, [token]);
 
-  // Scroll to bottom whenever messages change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -129,26 +125,22 @@ export default function Chat() {
     setInput('');
 
     const userMsg     = { role: 'user', content };
-    const newHistory  = [...messages, userMsg];
+    const chatHistory = [...messages.filter(m => ['user','assistant'].includes(m.role)), userMsg];
     const placeholder = { role: 'assistant', content: '', streaming: true };
 
-    setMessages([...newHistory, placeholder]);
+    setMessages([...messages, userMsg, placeholder]);
     setStreaming(true);
 
-    // Abort any prior stream
     abortRef.current?.abort();
-    const controller  = new AbortController();
-    abortRef.current  = controller;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       const res = await fetch('/api/chat/stream', {
         method : 'POST',
-        headers: {
-          'Authorization' : `Bearer ${token}`,
-          'Content-Type'  : 'application/json'
-        },
-        body   : JSON.stringify({ messages: newHistory, useContext, model }),
-        signal : controller.signal
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ messages: chatHistory, useContext, model }),
+        signal : controller.signal,
       });
 
       if (!res.ok) throw new Error(`Server error ${res.status}`);
@@ -175,7 +167,8 @@ export default function Chat() {
               assistantText += data.token;
               setMessages(prev => {
                 const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: assistantText, streaming: true };
+                const last    = updated.length - 1;
+                updated[last] = { role: 'assistant', content: assistantText, streaming: true };
                 return updated;
               });
             }
@@ -183,28 +176,36 @@ export default function Chat() {
             if (data.done) {
               setMessages(prev => {
                 const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: assistantText, streaming: false };
+                const last    = updated.length - 1;
+                updated[last] = { role: 'assistant', content: assistantText, streaming: false };
                 return updated;
               });
             }
 
             if (data.error) {
               setError(data.error);
-              setMessages(prev => prev.slice(0, -1)); // remove placeholder
+              setMessages(prev => {
+                if (prev.length && prev[prev.length-1].role === 'assistant' && !prev[prev.length-1].content)
+                  return prev.slice(0, -1);
+                return prev;
+              });
             }
-          } catch { /* partial line */ }
+          } catch { /* partial SSE line */ }
         }
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
         setError(err.message);
-        setMessages(prev => prev.slice(0, -1));
+        setMessages(prev => {
+          if (prev.length && prev[prev.length-1].role === 'assistant' && !prev[prev.length-1].content)
+            return prev.slice(0, -1);
+          return prev;
+        });
       }
     } finally {
       setStreaming(false);
-      // Finalize — make sure last message isn't stuck as streaming
       setMessages(prev => {
-        if (prev.length && prev[prev.length - 1].streaming) {
+        if (prev.length && prev[prev.length - 1]?.streaming) {
           const updated = [...prev];
           updated[updated.length - 1] = { ...updated[updated.length - 1], streaming: false };
           return updated;
@@ -216,10 +217,7 @@ export default function Chat() {
   }, [messages, streaming, useContext, model, token]);
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage(input);
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
   }
 
   function clearChat() {
@@ -238,15 +236,14 @@ export default function Chat() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <MessageSquare size={22} className="text-purple-400" />
-            SOC Analyst Chat
+            SOC Assistant
           </h1>
           <p className="text-gray-500 text-sm mt-0.5">
-            Ask anything about threats, alerts, or investigations — powered by local Ollama
+            Powered by local Ollama + RAG — retrieves from Wazuh, Suricata, Zeek, CrowdSec, Docker, Prometheus &amp; OpenCTI
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Context toggle */}
           <button
             onClick={() => setUseContext(v => !v)}
             title={useContext ? 'Live SOC context: ON' : 'Live SOC context: OFF'}
@@ -260,19 +257,15 @@ export default function Chat() {
             Live context
           </button>
 
-          {/* Settings toggle */}
           <button
             onClick={() => setShowSettings(v => !v)}
             className={`p-2 rounded-lg border transition-colors ${
-              showSettings
-                ? 'bg-gray-700 border-gray-600 text-white'
-                : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
+              showSettings ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
             }`}
           >
             <Settings size={14} />
           </button>
 
-          {/* Clear */}
           {messages.length > 0 && (
             <button
               onClick={clearChat}
@@ -308,7 +301,7 @@ export default function Chat() {
         <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg mb-3 flex-shrink-0">
           <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
           <p className="text-green-400 text-xs">
-            Live SOC context is on — the AI will read your current Wazuh alert data before responding
+            RAG active — relevant events from Wazuh, Suricata, Zeek, CrowdSec, Docker, Prometheus and OpenCTI are retrieved for each message
           </p>
         </div>
       )}
@@ -316,20 +309,18 @@ export default function Chat() {
       {/* ── Message area ── */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-1 pb-2">
 
-        {/* Empty state */}
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-6 py-8">
             <div className="text-center">
               <div className="w-14 h-14 rounded-2xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center mx-auto mb-3">
                 <Bot size={28} className="text-purple-400" />
               </div>
-              <p className="text-white font-semibold">SOC Analyst Assistant</p>
+              <p className="text-white font-semibold">SOC Assistant</p>
               <p className="text-gray-500 text-sm mt-1">
-                Powered by local Ollama — no data leaves your server
+                Ask about current alerts, MITRE techniques, investigation steps, or threat analysis
               </p>
             </div>
 
-            {/* Suggested prompts */}
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 w-full max-w-2xl">
               {SUGGESTIONS.map(({ icon: Icon, label, prompt }) => (
                 <button
@@ -345,23 +336,16 @@ export default function Chat() {
           </div>
         )}
 
-        {/* Messages */}
         {messages.map((msg, i) => (
-          <Message key={i} msg={msg} isLast={i === messages.length - 1} />
+          <Message key={i} msg={msg} />
         ))}
 
-        {/* Error */}
         {error && (
           <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
             <AlertTriangle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
             <div>
               <p className="text-red-400 text-xs font-medium">Error</p>
               <p className="text-red-300/70 text-xs mt-0.5">{error}</p>
-              {error.includes('Ollama') && (
-                <p className="text-gray-600 text-xs mt-1">
-                  Make sure the Ollama container is running and the model is loaded.
-                </p>
-              )}
             </div>
           </div>
         )}
@@ -379,7 +363,7 @@ export default function Chat() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask anything about threats, alerts, or investigations… (Enter to send, Shift+Enter for new line)"
+            placeholder="Ask about threats, alerts, MITRE techniques, investigation steps… (Enter to send)"
             rows={1}
             disabled={streaming}
             className="flex-1 bg-transparent text-gray-200 text-sm resize-none focus:outline-none placeholder-gray-600 max-h-40 overflow-y-auto leading-relaxed disabled:opacity-50"
@@ -394,10 +378,7 @@ export default function Chat() {
             disabled={!input.trim() || streaming}
             className="flex-shrink-0 p-2.5 rounded-xl transition-colors disabled:opacity-40 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 text-white"
           >
-            {streaming
-              ? <Loader size={16} className="animate-spin" />
-              : <Send size={16} />
-            }
+            {streaming ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
           </button>
         </div>
         <p className="text-gray-700 text-xs mt-1.5 text-center">

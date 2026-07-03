@@ -62,7 +62,7 @@ async function analyzeAlert(alert, correlated = []) {
       stream : false,
       options: { temperature: 0.1, top_p: 0.9, num_predict: 400 }
     }),
-    signal: AbortSignal.timeout(120_000)
+    signal: AbortSignal.timeout(300_000)
   });
 
   if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);

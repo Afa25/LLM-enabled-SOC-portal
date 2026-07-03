@@ -1,24 +1,26 @@
-const express   = require('express');
-const db        = require('../db/database');
-const wazuh     = require('../services/wazuh');
-const ollama    = require('../services/ollama');
+const express    = require('express');
+const db         = require('../db/database');
+const ollama     = require('../services/ollama');
+const collector  = require('../services/reportCollector');
 const { auth, adminOnly } = require('./auth');
 
 const router = express.Router();
 
-// ── List all reports ───────────────────────────────────────────
+// ── List all reports (includes content for viewer/download) ────
 router.get('/', auth, (req, res) => {
   const reports = db.get().prepare(
-    'SELECT id, title, timeframe, start_date, end_date, model, alert_count, created FROM reports ORDER BY created DESC LIMIT 100'
+    'SELECT id, title, timeframe, start_date, end_date, model, alert_count, created, content FROM reports ORDER BY created DESC LIMIT 100'
   ).all();
   res.json(reports);
 });
 
 // ── Available LLM models — MUST be before /:id ─────────────────
+// Filter out embedding-only models that don't support /api/generate
+const EMBED_MODELS = /embed|nomic-embed|all-minilm|mxbai-embed|snowflake-arctic-embed/i;
 router.get('/models/list', auth, async (req, res) => {
   try {
     const models = await ollama.listModels();
-    res.json(models);
+    res.json(models.filter(m => !EMBED_MODELS.test(m)));
   } catch {
     res.json([process.env.OLLAMA_MODEL || 'llama3.2:3b']);
   }
@@ -52,21 +54,17 @@ router.post('/generate', auth, async (req, res) => {
   res.status(202).json({ message: 'Report generation started', startISO, endISO });
 
   try {
-    const [alertData, agents] = await Promise.all([
-      wazuh.getAlertCountByRange(startISO, endISO),
-      wazuh.getAgents()
-    ]);
-
-    const context = { ...alertData, agents, startDate: startISO, endDate: endISO };
+    const context = await collector.collectAll(startISO, endISO);
     const content = await ollama.generateReport(context, timeframe, model);
 
     const title = `${timeframe.charAt(0).toUpperCase()+timeframe.slice(1)} SOC Report — ${end.toLocaleDateString()}`;
+    const alertCount = context.alerts?.total ?? 0;
     db.get().prepare(
       'INSERT INTO reports (title, timeframe, start_date, end_date, content, model, alert_count) VALUES (?,?,?,?,?,?,?)'
-    ).run(title, timeframe, startISO, endISO, content, model, alertData.total);
+    ).run(title, timeframe, startISO, endISO, content, model, alertCount);
 
     db.get().prepare('INSERT INTO audit_log (user,action,detail) VALUES (?,?,?)').run(
-      req.user.username, 'REPORT_GENERATED', `${title} | Alerts: ${alertData.total}`
+      req.user.username, 'REPORT_GENERATED', `${title} | Alerts: ${alertCount}`
     );
   } catch (err) {
     console.error('[Reports] Generation error:', err.message);
@@ -84,11 +82,7 @@ router.get('/stream/:requestId', auth, async (req, res) => {
   const startISO = new Date(Date.now() - 86400_000).toISOString();
 
   try {
-    const [alertData, agents] = await Promise.all([
-      wazuh.getAlertCountByRange(startISO, endISO),
-      wazuh.getAgents()
-    ]);
-    const context = { ...alertData, agents, startDate: startISO, endDate: endISO };
+    const context = await collector.collectAll(startISO, endISO);
     let full = '';
 
     await ollama.streamReport(context, timeframe, model, chunk => {
@@ -97,9 +91,10 @@ router.get('/stream/:requestId', auth, async (req, res) => {
     });
 
     const title = `${timeframe} SOC Report — ${new Date().toLocaleDateString()} (streamed)`;
+    const alertCount = context.alerts?.total ?? 0;
     db.get().prepare(
       'INSERT INTO reports (title,timeframe,start_date,end_date,content,model,alert_count) VALUES (?,?,?,?,?,?,?)'
-    ).run(title, timeframe, startISO, endISO, full, model, alertData.total);
+    ).run(title, timeframe, startISO, endISO, full, model, alertCount);
 
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
   } catch (err) {

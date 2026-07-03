@@ -14,7 +14,7 @@ datasources:
       database: wazuh-alerts-4.x-*
       timeField: "@timestamp"
       flavor: opensearch
-      version: "2.0.0"
+      version: "2.10.0"
       tlsSkipVerify: true
       logMessageField: rule.description
       logLevelField: rule.level

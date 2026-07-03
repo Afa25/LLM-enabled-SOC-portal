@@ -16,6 +16,7 @@ Covers full startup, mandatory first-run initialization, feature testing, and tr
 7. [Enrol Wazuh Agents](#7-enrol-wazuh-agents)
 8. [Stop / Restart / Update](#8-stop--restart--update)
 9. [Troubleshooting Reference](#9-troubleshooting-reference)
+10. [Running the Full Stack on Windows via WSL2 (Zeek + Suricata)](#10-running-the-full-stack-on-windows-via-wsl2-zeek--suricata)
 
 ---
 
@@ -40,10 +41,11 @@ cd C:\Users\Hp\Desktop\LLM-enabled-SOC-portal\soc-portal
 
 ### Pull images and start core services
 
-> Zeek, Suricata, and OpenVAS are excluded here because:  
-> - Zeek/Suricata use `network_mode: host` which does not work on Windows Docker Engine  
-> - OpenVAS takes 10–20 min for its NVT feed sync on first boot  
-> Start them separately once the core stack is stable.
+> **Two setup paths:**
+> - **This section (no WSL2)** — runs the core SOC stack. Zeek and Suricata are excluded because `network_mode: host` requires a Linux kernel, which bare Windows Docker Engine does not provide.
+> - **[Section 10 — WSL2 full stack](#10-running-the-full-stack-on-windows-via-wsl2-zeek--suricata)** — runs everything including Zeek and Suricata by using a real Linux kernel via WSL2. Recommended if you need live network traffic analysis.
+>
+> OpenVAS is excluded from both paths due to its 10–20 min NVT feed sync on first boot — start it manually once the rest of the stack is stable.
 
 ```bash
 docker compose --env-file .env up -d \
@@ -462,6 +464,232 @@ If RAM is under pressure, scale back:
 | **Wazuh Manager API** | `55000` | Internal only (portal connects via Docker network) |
 | **Wazuh Agent syslog** | `514/udp` | For log forwarding |
 | **Wazuh Agent enrollment** | `1514, 1515` | For agent registration |
+
+---
+
+*Last verified: 2026-04-15 with Docker Engine 29.4.0, Docker Compose v5.1.1 on Windows 11.*
+
+---
+
+## 10. Running the Full Stack on Windows via WSL2 (Zeek + Suricata)
+
+**Why WSL2?**  
+Zeek and Suricata use `network_mode: host` to capture raw network traffic. This requires a real Linux kernel — which bare Windows Docker Engine does not have. WSL2 provides a full Linux kernel inside Windows, making the complete stack work.
+
+**What you gain:** live network traffic analysis (Zeek connection logs, Suricata IDS alerts) fed into Wazuh and the portal dashboard.
+
+---
+
+### Step 1 — Enable WSL2 and Install Ubuntu
+
+Open **PowerShell as Administrator**:
+
+```powershell
+wsl --install -d Ubuntu-22.04
+wsl --set-default-version 2
+```
+
+Restart your machine when prompted. After reboot, Ubuntu will finish installing and ask you to create a Linux username and password.
+
+Verify WSL2 is active:
+
+```powershell
+wsl -l -v
+# NAME            STATE    VERSION
+# Ubuntu-22.04    Running  2       <-- must be VERSION 2
+```
+
+---
+
+### Step 2 — Configure Docker for WSL2
+
+**Option A — Docker Desktop (recommended for most users):**
+
+1. Open **Docker Desktop** → **Settings** → **Resources** → **WSL Integration**
+2. Enable integration for **Ubuntu-22.04**
+3. Click **Apply & Restart**
+
+After this, the `docker` and `docker compose` commands are available inside your WSL2 Ubuntu terminal automatically.
+
+**Option B — Docker Engine directly inside WSL2 (no Docker Desktop):**
+
+Run the following inside your Ubuntu WSL2 terminal:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo usermod -aG docker $USER
+newgrp docker
+sudo service docker start
+```
+
+Verify:
+```bash
+docker run --rm hello-world
+```
+
+---
+
+### Step 3 — Fix `vm.max_map_count` for OpenSearch
+
+OpenSearch (Wazuh Indexer) requires `vm.max_map_count ≥ 262144`. In WSL2, the `sysctl-init` container cannot set kernel parameters. You must set it on the WSL2 kernel directly.
+
+**Persistent fix — edit `.wslconfig` in Windows:**
+
+1. Open `%USERPROFILE%\.wslconfig` in Notepad (create it if it doesn't exist):
+   ```
+   C:\Users\<YourName>\.wslconfig
+   ```
+2. Add:
+   ```ini
+   [wsl2]
+   kernelCommandLine = sysctl.vm.max_map_count=262144
+   ```
+3. Shut down WSL2 and restart it:
+   ```powershell
+   # In PowerShell
+   wsl --shutdown
+   ```
+   Then reopen your Ubuntu terminal.
+
+**Verify inside Ubuntu:**
+```bash
+sysctl vm.max_map_count
+# Expected: vm.max_map_count = 262144
+```
+
+---
+
+### Step 4 — Get the Project into WSL2
+
+**Option A — Work from the Windows path directly (simpler, slower I/O):**
+```bash
+cd /mnt/c/Users/Golden/Desktop/LLM-enabled-SOC-portal/soc-portal
+```
+> File I/O across the `/mnt/c` boundary is slower. Fine for running the stack, but not ideal for active development.
+
+**Option B — Copy into the WSL2 filesystem (recommended, faster I/O):**
+```bash
+cp -r /mnt/c/Users/Golden/Desktop/LLM-enabled-SOC-portal ~/LLM-enabled-SOC-portal
+cd ~/LLM-enabled-SOC-portal/soc-portal
+```
+
+**Fix line endings on shell scripts (required if the repo was ever touched on Windows without `.gitattributes` enforcement):**
+```bash
+sudo apt-get install -y dos2unix
+find . -name "*.sh" | xargs dos2unix
+find . -name "filebeat-run" | xargs dos2unix
+```
+
+---
+
+### Step 5 — Set the Network Interface
+
+Zeek and Suricata need to know which interface to capture traffic on. Inside WSL2 the default interface is `eth0`.
+
+Check yours:
+```bash
+ip link show
+# Look for an interface named eth0 or similar
+```
+
+Edit your `.env` file and set:
+```env
+ZEEK_INTERFACE=eth0
+```
+
+> If you see `eth0` in `ip link show` but the name is different (e.g. `ens3`), use that name instead.
+
+---
+
+### Step 6 — Start the Full Stack
+
+From inside your Ubuntu WSL2 terminal, run:
+
+```bash
+docker compose --env-file .env up -d \
+  wazuh-indexer wazuh-manager wazuh-dashboard \
+  grafana prometheus node-exporter \
+  ollama soc-portal nginx \
+  zeek suricata
+```
+
+Wait 3–5 minutes for all services to reach healthy status:
+
+```bash
+docker compose ps
+```
+
+Expected additional services now running:
+```
+NAME            STATUS
+soc-zeek        Up
+soc-suricata    Up
+```
+
+Then follow **Section 3 (First-Run Initialization)** exactly as documented — it is the same on WSL2.
+
+---
+
+### Step 7 — Access the Portal from Windows
+
+With **Docker Desktop WSL2 integration**, ports are forwarded to Windows automatically:
+
+| Interface | URL |
+|-----------|-----|
+| SOC Portal | http://localhost |
+| Grafana | http://localhost/grafana |
+| Wazuh Dashboard | http://localhost/wazuh |
+
+With **Docker Engine inside WSL2 only** (Option B), use the WSL2 VM's IP instead of `localhost`:
+
+```bash
+# Get the WSL2 IP
+ip addr show eth0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1
+```
+
+Then open `http://<that-ip>` in your Windows browser.
+
+---
+
+### Step 8 — Verify Zeek and Suricata Are Capturing
+
+```bash
+# Zeek — check connection logs are being written
+docker exec soc-zeek ls -lh /pcap/logs/
+# Or check the volume directly
+docker logs soc-zeek --tail 20
+
+# Suricata — check eve.json is being written
+docker exec soc-suricata tail -n 5 /var/log/suricata/eve.json
+docker logs soc-suricata --tail 20
+```
+
+In the SOC Portal dashboard, the **Network Analysis** section should now show Zeek connection summaries and Suricata IDS alert counts once traffic is flowing.
+
+---
+
+### WSL2 Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `vm.max_map_count` too low — Wazuh Indexer unhealthy | WSL2 kernel default is too low | Add `kernelCommandLine` to `.wslconfig`, run `wsl --shutdown`, restart |
+| Zeek / Suricata containers exit immediately | Wrong interface name in `ZEEK_INTERFACE` | Run `ip link show` in WSL2 and update `.env` |
+| `permission denied` on `.sh` scripts | CRLF line endings or missing execute bit | `find . -name "*.sh" \| xargs dos2unix && chmod +x scripts/*.sh` |
+| `docker: command not found` in WSL2 | Docker Desktop WSL integration not enabled | Docker Desktop → Settings → WSL Integration → enable Ubuntu-22.04 |
+| `localhost` not accessible from Windows browser | Using Docker Engine without Desktop port forwarding | Use the WSL2 VM IP (`ip addr show eth0`) |
+| OpenSearch indexer stays unhealthy | `vm.max_map_count` not applied yet | Run `sysctl vm.max_map_count` inside WSL2 to confirm it's 262144 |
+| Zeek logs empty after 5 minutes | Traffic not reaching `eth0` inside WSL2 | Try `ZEEK_INTERFACE=eth0` and generate traffic: `curl http://example.com` from inside WSL2 |
 
 ---
 

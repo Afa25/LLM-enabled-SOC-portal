@@ -240,16 +240,21 @@
       error_page 401  = @sso_login;
 
       set $upstream_velo https://velociraptor:8889;
-      proxy_pass         $upstream_velo;
-      proxy_ssl_verify   off;
-      proxy_http_version 1.1;
-      proxy_set_header   Upgrade           $http_upgrade;
-      proxy_set_header   Connection        $connection_upgrade;
-      proxy_set_header   Host              velociraptor;
-      proxy_set_header   X-Real-IP         $remote_addr;
-      proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-      proxy_set_header   X-Forwarded-Proto $scheme;
-      proxy_set_header   Authorization     "Basic ${VELO_BASIC_AUTH_B64}";
-      proxy_read_timeout 300s;
+      proxy_pass                $upstream_velo;
+      proxy_ssl_verify          off;
+      proxy_http_version        1.1;
+      proxy_set_header          Upgrade                $http_upgrade;
+      proxy_set_header          Connection             $connection_upgrade;
+      proxy_set_header          Host                   velociraptor;
+      proxy_set_header          X-Real-IP              $remote_addr;
+      proxy_set_header          X-Forwarded-For        $proxy_add_x_forwarded_for;
+      proxy_set_header          X-Forwarded-Proto      $scheme;
+      proxy_set_header          Authorization          "Basic ${VELO_BASIC_AUTH_B64}";
+      proxy_read_timeout        300s;
+      proxy_send_timeout        300s;
+      # gRPC-web streaming: disable buffering so frames reach the browser immediately
+      proxy_buffering           off;
+      proxy_cache               off;
+      proxy_request_buffering   off;
     }
   }
